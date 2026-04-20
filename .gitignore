@@ -1,0 +1,28 @@
+node_modules/
+
+# Local Colony runtime state
+.tmp-home/
+.colony/
+data/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+*.jsonl
+
+# Verification/build artifacts
+.tmp-verify19/
+coverage/
+dist/
+build/
+colony
+colony.exe
+
+# Local env/config
+.env
+.env.*
+!.env.example
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

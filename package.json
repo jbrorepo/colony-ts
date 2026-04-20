@@ -1,0 +1,49 @@
+{
+  "name": "colony-ts",
+  "version": "2.0.0",
+  "description": "The Colony — Agent Operating System (TypeScript)",
+  "main": "src/index.tsx",
+  "type": "module",
+  "bin": {
+    "colony": "./src/index.tsx"
+  },
+  "scripts": {
+    "start": "bun run src/index.tsx",
+    "dev": "bun run --watch src/index.tsx",
+    "build": "bun build ./src/index.tsx --compile --outfile colony",
+    "verify:all": "bun run verify:phase1 && bun run verify:phase2 && bun run verify:phase3 && bun run verify:phase4 && bun run verify:phase5 && bun run verify:phase6 && bun run verify:phase7 && bun run verify:phase8 && bun run verify:phase9 && bun run verify:phase10 && bun run verify:phase11 && bun run verify:phase12 && bun run verify:phase13 && bun run verify:phase14 && bun run verify:phase15 && bun run verify:phase16 && bun run verify:phase17 && bun run verify:phase18 && bun run verify:phase19 && bun run verify:phase19a && node ./node_modules/typescript/bin/tsc --noEmit",
+    "verify:phase1": "bun run src/verify-phase1.ts",
+    "verify:phase2": "bun run src/verify-phase2.ts",
+    "verify:phase3": "bun run src/verify-phase3.ts",
+    "verify:phase4": "bun run src/verify-phase4.ts",
+    "verify:phase5": "bun run src/verify-phase5.ts",
+    "verify:phase6": "bun run src/verify-phase6.ts",
+    "verify:phase7": "bun run src/verify-phase7.ts",
+    "verify:phase8": "bun run src/verify-phase8.ts",
+    "verify:phase9": "bun run src/verify-phase9.ts",
+    "verify:phase10": "bun run src/verify-phase10.ts",
+    "verify:phase11": "bun run src/verify-phase11.ts",
+    "verify:phase12": "bun run src/verify-phase12.ts",
+    "verify:phase13": "bun run src/verify-phase13.ts",
+    "verify:phase14": "bun run src/verify-phase14.ts",
+    "verify:phase15": "bun run src/verify-phase15.ts",
+    "verify:phase16": "bun run src/verify-phase16.ts",
+    "verify:phase17": "bun run src/verify-phase17.ts",
+    "verify:phase18": "bun run src/verify-phase18.ts",
+    "verify:phase19": "node ./node_modules/typescript/bin/tsc --outDir .tmp-verify19 --module ESNext --moduleResolution bundler --target ESNext --types bun-types --esModuleInterop --skipLibCheck src/verify-phase19.ts && bun .tmp-verify19/verify-phase19.js",
+    "verify:phase19a": "bun run src/verify-phase19a.ts"
+  },
+  "dependencies": {
+    "ink": "^4.4.1",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^5.0.1",
+    "react": "^18.2.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.37",
+    "bun-types": "latest",
+    "react-devtools-core": "^7.0.1",
+    "typescript": "^5.2.2"
+  }
+}
