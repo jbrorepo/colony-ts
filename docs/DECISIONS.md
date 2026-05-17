@@ -2,7 +2,7 @@
 
 > **Purpose:** Record of every significant architectural decision made across conversations. Consult this before making new architectural choices — it may already be decided.
 
-**Last Updated:** April 14, 2026
+**Last Updated:** May 14, 2026
 
 ---
 
@@ -43,7 +43,7 @@
 
 | # | Decision | Rationale | Date | Source |
 |:---:|:---|:---|:---|:---|
-| D13 | **11 castes exactly** — no more, no fewer | Direct port from Python `enums.py`; castes are the product's identity | Pre-project | Colony Bible |
+| D13 | **12-caste method framework with legacy runtime aliases** | The Python 11-caste enum remains compatibility input for persisted sessions, while the public/operator method framework is Queen, Eldest, Assist-Ant, Command-ant, Vigil-ant, Develop-ant, Logist-ant, Consult-ant, Inform-ant, Cogniz-ant, Account-ant, and Oper-ant. | May 14, 2026 | Phase 279 |
 | D14 | **Settings resolution: env var → config.json → defaults** | 3-tier resolution using `Bun.env` and `Bun.file()`; matches Python `Settings.__init__` | Pre-project | Blueprint Phase 1 |
 | D15 | **Bootstrap order: Store → Security → LLM → Gateway** | Critical subsystems halt colony on failure; non-critical log warning and continue | Pre-project | Blueprint Phase 1 |
 | D16 | **Parallel tool execution for read-only ops** | Tools categorized as `search`, `read`, or `web` run via `Promise.all()`; mutating tools run sequentially | April 13, 2026 | Walkthrough |
@@ -57,8 +57,8 @@
 | # | Decision | Rationale | Date | Source |
 |:---:|:---|:---|:---|:---|
 | D19 | **6 compaction strategies** (standard, micro, reactive, session_memory, cached_micro, context_collapse) | Matches Python reference; different aggression levels for different pressure scenarios | Pre-project | Blueprint Phase 4 |
-| D20 | **Caste-aware retention counts** | ROOT_QUEEN: 20 messages, SHIELD_GENERALS: 14, ASSIST_ANT: 12, WATCHER_SWARM: 8, etc. | Pre-project | Blueprint Phase 4 |
-| D21 | **MemPalace integration deferred** to post-Phase 9 | Current stubs compile but are non-functional; single-session use doesn't require it; full 12-module port is P2 | April 13, 2026 | Gap Analysis |
+| D20 | **Caste-aware retention counts** | Queen: 20 messages, Vigil-ant: 14, Assist-Ant: 12, Consult-ant: 8, etc.; legacy runtime values remain compatibility aliases only. | Pre-project | Blueprint Phase 4 |
+| D21 | **MemPalace integration is active Phase 2 foundation work** | Async-safe MemPalace store/layers and routing are shipped; remaining work is retrieval precision, hierarchy polish, and operator inspection closure | April 28, 2026 | Gap Analysis + Phase 19/19a/16 evidence |
 | D22 | **AAAK dialect NOT adopted** for storage | Raw verbatim mode scores 96.6% vs AAAK's 84.2% on LongMemEval; raw is the storage default | April 13, 2026 | Reference Analysis |
 
 ---
@@ -81,7 +81,7 @@
 | D27 | **Each task = one commit, each phase = one PR** | Clean history; branch naming: `phase-{N}-{short-name}` | Pre-project | Roadmap |
 | D28 | **Never add `from __future__ import annotations`** to `app.py` or `pwa/router.py` | Causes Pydantic/FastAPI forward-ref errors in the Python codebase | Pre-project | Roadmap critical rules |
 | D29 | **ActivityType uses `TOOL_CALL_START`/`TOOL_CALL_END`** — NOT `TOOL_CALL` | Avoids name collisions with audit event types | Pre-project | Roadmap critical rules |
-| D30 | **Verification suites as test runner** (not Jest/Vitest) | `verify-phase1.ts` through `verify-phase7.ts` with assertion counts; matches Python test structure | April 13, 2026 | QA Report |
+| D30 | **Verification suites as test runner** (not Jest/Vitest) | Project-local `verify-phase*.ts` scripts and named package gates remain the test-runner convention; current release truth is `verify:phase282` plus `tsc --noEmit` through `verify:all`, with focused gates such as `verify:alpha0` for launch scope. | May 14, 2026 | QA Report + cleanup source-of-truth refresh |
 
 ---
 
@@ -93,8 +93,8 @@
 | Topic | Options | Blocking |
 |:---|:---|:---|
 | **Zustand vs useState** | Wire Zustand stores OR remove dependency | Phase 8+ (persistent state) |
-| **Docker sandbox for NAMELESS_SWARM** | Full Docker isolation OR Bun subprocess isolation | Phase 9+ (multi-agent) |
-| **MCP server implementation** | stdio mode OR SSE mode OR both | Phase 9+ (IDE integration) |
+| **Oper-ant sandboxing** | Full Docker isolation OR Bun subprocess isolation | Phase 9+ (multi-agent) |
+| **External MCP transports** | stdio mode OR SSE mode OR both | Phase 5+ after the shipped in-process MCP server/client/tool-adapter foundation is hardened |
 | **Logging infrastructure** | Structured JSON logging OR pino OR winston OR custom | Phase 8 |
 | **IDE bridge** | VS Code extension OR Language Server Protocol OR both | Phase 9+ |
-| **Channel adapters** (Slack, Discord, etc.) | Port from Python OR build fresh from OpenClaw patterns | Phase 9+ |
+| **External channel adapters** (Slack, Discord, Telegram, etc.) | Port from Python OR build fresh from OpenClaw patterns | Phase 6+ after the shipped in-memory/webhook/session-bridge channel foundation |

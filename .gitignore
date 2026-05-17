@@ -11,6 +11,7 @@ logs/
 *.jsonl
 
 # Verification/build artifacts
+.tmp-*/
 .tmp-verify19/
 coverage/
 dist/

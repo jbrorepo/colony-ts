@@ -1,0 +1,317 @@
+﻿## main
+ M .gitignore
+ M AGENTS.md
+ M docs/BENCHMARK_BOARD.md
+ M docs/COLONY_BIBLE.md
+ M docs/DECISIONS.md
+ M docs/EXECUTION_PLAN.md
+ M docs/GAP_ANALYSIS.md
+ M docs/ROADMAP.md
+ M package.json
+ M src/gateway-basic.ts
+ M src/gateway-compact.ts
+ M src/gateway-contract.ts
+ M src/gateway-control.ts
+ M src/gateway-execute.ts
+ M src/gateway-parse.ts
+ M src/gateway-provider.ts
+ M src/gateway-runtime.ts
+ M src/gateway-session.ts
+ M src/gateway-tools.ts
+ M src/gateway.ts
+ M src/memory/artifact-store.ts
+ M src/memory/auto-memory.ts
+ M src/memory/conversation-log.ts
+ M src/memory/extractor.ts
+ M src/memory/hybrid-memory.ts
+ M src/memory/service.ts
+ M src/mempalace/layers.ts
+ M src/mempalace/store.ts
+ M src/mempalace/types.ts
+ M src/runtime/approval.ts
+ M src/runtime/builtin-tools.ts
+ M src/runtime/compaction.ts
+ M src/runtime/loop.ts
+ M src/runtime/prompt-assembler.ts
+ M src/runtime/runtime-tooling.ts
+ M src/runtime/session-recovery.ts
+ M src/runtime/startup-diagnostics.ts
+ M src/runtime/tools-registry.ts
+ M src/ui/app.tsx
+ M src/ui/components.tsx
+ M src/ui/store.ts
+ M src/ui/use-colony-loop.ts
+ M src/verify-phase1.ts
+ M src/verify-phase14.ts
+ M src/verify-phase15.ts
+ M src/verify-phase16.ts
+ M src/verify-phase17.ts
+ M src/verify-phase18.ts
+ M src/verify-phase19.ts
+ M src/verify-phase19a.ts
+ M src/verify-phase5.ts
+ M src/verify-phase6.ts
+ M src/verify-phase7.ts
+ M src/verify-phase8.ts
+ M src/verify-phase9.ts
+?? README.md
+?? docs/ANTELLIGENCE_LAUNCH_CHECKLIST.md
+?? docs/ANTELLIGENCE_PLAYBOOK.md
+?? docs/COLONY_METHOD_FRAMEWORK_BIBLE.md
+?? docs/LAUNCH_ALPHA_0.md
+?? docs/MARKET_GAP_ANALYSIS.md
+?? docs/PARITY_EXECUTION_BOARD.md
+?? docs/PROJECT_STATE.md
+?? docs/SKILLS_REPO_REVIEW.md
+?? docs/release/
+?? docs/superpowers/
+?? docs/templates/
+?? src/agents/
+?? src/alpha0-provider-readiness.ts
+?? src/channel/
+?? src/daemon/
+?? src/gateway-channels.ts
+?? src/gateway-daemon.ts
+?? src/gateway-doctor-snapshot.ts
+?? src/gateway-events-snapshot.ts
+?? src/gateway-provider-snapshot.ts
+?? src/gateway-session-snapshot.ts
+?? src/gateway-skills.ts
+?? src/gateway-status-snapshot.ts
+?? src/gateway-swarm.ts
+?? src/gateway-workflow.ts
+?? src/github-local-workspace-executor.ts
+?? src/github-pr-handoff.ts
+?? src/mcp/
+?? src/memory/query-intent.ts
+?? src/memory/structured-ranking.ts
+?? src/orchestrator/
+?? src/runtime/message-queue.ts
+?? src/runtime/runtime-snapshot.ts
+?? src/runtime/session-shortcuts.ts
+?? src/skills/
+?? src/verify-alpha0.ts
+?? src/verify-phase100.ts
+?? src/verify-phase101.ts
+?? src/verify-phase102.ts
+?? src/verify-phase103.ts
+?? src/verify-phase104.ts
+?? src/verify-phase105.ts
+?? src/verify-phase106.ts
+?? src/verify-phase107.ts
+?? src/verify-phase108.ts
+?? src/verify-phase109.ts
+?? src/verify-phase110.ts
+?? src/verify-phase111.ts
+?? src/verify-phase112.ts
+?? src/verify-phase113.ts
+?? src/verify-phase114.ts
+?? src/verify-phase115.ts
+?? src/verify-phase116.ts
+?? src/verify-phase117.ts
+?? src/verify-phase118.ts
+?? src/verify-phase119.ts
+?? src/verify-phase120.ts
+?? src/verify-phase121.ts
+?? src/verify-phase122.ts
+?? src/verify-phase123.ts
+?? src/verify-phase124.ts
+?? src/verify-phase125.ts
+?? src/verify-phase126.ts
+?? src/verify-phase127.ts
+?? src/verify-phase128.ts
+?? src/verify-phase129.ts
+?? src/verify-phase130.ts
+?? src/verify-phase131.ts
+?? src/verify-phase132.ts
+?? src/verify-phase133.ts
+?? src/verify-phase134.ts
+?? src/verify-phase135.ts
+?? src/verify-phase136.ts
+?? src/verify-phase137.ts
+?? src/verify-phase138.ts
+?? src/verify-phase139.ts
+?? src/verify-phase140.ts
+?? src/verify-phase141.ts
+?? src/verify-phase142.ts
+?? src/verify-phase143.ts
+?? src/verify-phase144.ts
+?? src/verify-phase145.ts
+?? src/verify-phase146.ts
+?? src/verify-phase147.ts
+?? src/verify-phase148.ts
+?? src/verify-phase149.ts
+?? src/verify-phase150.ts
+?? src/verify-phase151.ts
+?? src/verify-phase152.ts
+?? src/verify-phase153.ts
+?? src/verify-phase154.ts
+?? src/verify-phase155.ts
+?? src/verify-phase156.ts
+?? src/verify-phase157.ts
+?? src/verify-phase158.ts
+?? src/verify-phase159.ts
+?? src/verify-phase160.ts
+?? src/verify-phase161.ts
+?? src/verify-phase162.ts
+?? src/verify-phase163.ts
+?? src/verify-phase164.ts
+?? src/verify-phase165.ts
+?? src/verify-phase166.ts
+?? src/verify-phase167.ts
+?? src/verify-phase168.ts
+?? src/verify-phase169.ts
+?? src/verify-phase170.ts
+?? src/verify-phase171.ts
+?? src/verify-phase172.ts
+?? src/verify-phase173.ts
+?? src/verify-phase174.ts
+?? src/verify-phase175.ts
+?? src/verify-phase176.ts
+?? src/verify-phase177.ts
+?? src/verify-phase178.ts
+?? src/verify-phase179.ts
+?? src/verify-phase180.ts
+?? src/verify-phase181.ts
+?? src/verify-phase182.ts
+?? src/verify-phase183.ts
+?? src/verify-phase184.ts
+?? src/verify-phase185.ts
+?? src/verify-phase186.ts
+?? src/verify-phase187.ts
+?? src/verify-phase188.ts
+?? src/verify-phase189.ts
+?? src/verify-phase190.ts
+?? src/verify-phase191.ts
+?? src/verify-phase192.ts
+?? src/verify-phase193.ts
+?? src/verify-phase194.ts
+?? src/verify-phase195.ts
+?? src/verify-phase196.ts
+?? src/verify-phase197.ts
+?? src/verify-phase198.ts
+?? src/verify-phase199.ts
+?? src/verify-phase20.ts
+?? src/verify-phase200.ts
+?? src/verify-phase201.ts
+?? src/verify-phase202.ts
+?? src/verify-phase203.ts
+?? src/verify-phase204.ts
+?? src/verify-phase205.ts
+?? src/verify-phase206.ts
+?? src/verify-phase207.ts
+?? src/verify-phase208.ts
+?? src/verify-phase209.ts
+?? src/verify-phase21.ts
+?? src/verify-phase210.ts
+?? src/verify-phase211.ts
+?? src/verify-phase212.ts
+?? src/verify-phase213.ts
+?? src/verify-phase214.ts
+?? src/verify-phase215.ts
+?? src/verify-phase216.ts
+?? src/verify-phase217.ts
+?? src/verify-phase218.ts
+?? src/verify-phase219.ts
+?? src/verify-phase22.ts
+?? src/verify-phase220.ts
+?? src/verify-phase221.ts
+?? src/verify-phase222.ts
+?? src/verify-phase223.ts
+?? src/verify-phase224.ts
+?? src/verify-phase225.ts
+?? src/verify-phase226.ts
+?? src/verify-phase227.ts
+?? src/verify-phase228.ts
+?? src/verify-phase229.ts
+?? src/verify-phase23.ts
+?? src/verify-phase230.ts
+?? src/verify-phase231.ts
+?? src/verify-phase232.ts
+?? src/verify-phase233.ts
+?? src/verify-phase234.ts
+?? src/verify-phase235.ts
+?? src/verify-phase236.ts
+?? src/verify-phase237.ts
+?? src/verify-phase238.ts
+?? src/verify-phase239.ts
+?? src/verify-phase24.ts
+?? src/verify-phase25.ts
+?? src/verify-phase26.ts
+?? src/verify-phase27.ts
+?? src/verify-phase28.ts
+?? src/verify-phase29.ts
+?? src/verify-phase30.ts
+?? src/verify-phase31.ts
+?? src/verify-phase32.ts
+?? src/verify-phase33.ts
+?? src/verify-phase34.ts
+?? src/verify-phase35.ts
+?? src/verify-phase36.ts
+?? src/verify-phase37.ts
+?? src/verify-phase38.ts
+?? src/verify-phase39.ts
+?? src/verify-phase40.ts
+?? src/verify-phase41.ts
+?? src/verify-phase42.ts
+?? src/verify-phase43.ts
+?? src/verify-phase44.ts
+?? src/verify-phase45.ts
+?? src/verify-phase46.ts
+?? src/verify-phase47.ts
+?? src/verify-phase48.ts
+?? src/verify-phase49.ts
+?? src/verify-phase50.ts
+?? src/verify-phase51.ts
+?? src/verify-phase52.ts
+?? src/verify-phase53.ts
+?? src/verify-phase54.ts
+?? src/verify-phase55.ts
+?? src/verify-phase56.ts
+?? src/verify-phase57.ts
+?? src/verify-phase58.ts
+?? src/verify-phase59.ts
+?? src/verify-phase60.ts
+?? src/verify-phase61.ts
+?? src/verify-phase62.ts
+?? src/verify-phase63.ts
+?? src/verify-phase64.ts
+?? src/verify-phase65.ts
+?? src/verify-phase66.ts
+?? src/verify-phase67.ts
+?? src/verify-phase68.ts
+?? src/verify-phase69.ts
+?? src/verify-phase70.ts
+?? src/verify-phase71.ts
+?? src/verify-phase72.ts
+?? src/verify-phase73.ts
+?? src/verify-phase74.ts
+?? src/verify-phase75.ts
+?? src/verify-phase76.ts
+?? src/verify-phase77.ts
+?? src/verify-phase78.ts
+?? src/verify-phase79.ts
+?? src/verify-phase80.ts
+?? src/verify-phase81.ts
+?? src/verify-phase82.ts
+?? src/verify-phase83.ts
+?? src/verify-phase84.ts
+?? src/verify-phase85.ts
+?? src/verify-phase86.ts
+?? src/verify-phase87.ts
+?? src/verify-phase88.ts
+?? src/verify-phase89.ts
+?? src/verify-phase90.ts
+?? src/verify-phase91.ts
+?? src/verify-phase92.ts
+?? src/verify-phase93.ts
+?? src/verify-phase94.ts
+?? src/verify-phase95.ts
+?? src/verify-phase96.ts
+?? src/verify-phase97.ts
+?? src/verify-phase98.ts
+?? src/verify-phase99.ts
+?? src/verify-release.ts
+?? src/verify-workspace-cleanup.ts
+?? src/web-control.ts
+?? src/workflow/

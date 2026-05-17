@@ -15,6 +15,12 @@ The Colony exists to bridge the gap between "Vibe Coding" (rapid, untested AI ge
 2. **Local-First with Zero Credit Usage** — Ollama is the default. External providers (OpenAI, Anthropic, Gemini) are optional, budget-gated, and metered. The Colony should cost the user nothing to run locally.
 3. **Ability to Call Outside Models** — Broad provider support, but always regulated through cost controls, effort classification, and failover meshes.
 
+### Antelligence Operating Model
+
+Antelligence is the enterprise product-development expression of The Colony's identity. It frames product work as a superorganism operating model: local signals drive global coordination, discovery acts as scouting, the platform is the nest, labor adapts to system demand, governance is evidence-threshold based, quality/security/operations form the immune system, and scale happens by controlled fission instead of uncontrolled sprawl.
+
+This does not replace the Caste system, Manifesto, Security Mesh, MemPalace, exact transcript truth, or conservative approvals. It is the launch-facing playbook for applying those principles to enterprise product development. See [ANTELLIGENCE_PLAYBOOK.md](./ANTELLIGENCE_PLAYBOOK.md) and [ANTELLIGENCE_LAUNCH_CHECKLIST.md](./ANTELLIGENCE_LAUNCH_CHECKLIST.md).
+
 ### Core Capabilities
 
 - **Zero-Friction Distribution:** Bundled via Bun and TypeScript into a single globally installable CLI executable (`colony.exe`, ~111 MB). No complex Python environments. One binary does everything.
@@ -40,26 +46,41 @@ The Colony exists to bridge the gap between "Vibe Coding" (rapid, untested AI ge
 
 ---
 
-## 3. The 11-Caste System
+## 3. The 12-Caste Method Framework
 
-The Colony doesn't rely on a monolithic brain. User intents are filtered through the **Hybrid Triage Router** to securely delegate tasks to the **11 True Castes**:
+The Colony does not rely on a monolithic brain. User intents move through a **12-caste method framework** that keeps planning, command, security, execution, verification, memory, accounting, and fanout authority separate. The old Python 11-caste names remain accepted as compatibility aliases for persisted runtime state; operator-facing language should prefer the method names below.
 
 | Caste | Identity | Primary Role | Shell | HTTP | File |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **1. Root Queen** | Sovereign | Core execution routing, unbounded access | All | All | All |
-| **2. Eldest Architect** | Planner | RED-GREEN execution scope before coding begins | Default | All | All |
-| **3. Assist Ant** | Concierge | User-facing companion, human-to-swarm interface | ❌ Denied | All | All |
-| **4. Shield Generals** | Enforcer | Security auditing, rule gating, sandbox validation | Broad (blocks `sudo`, `su`, `shutdown`) | All | All |
-| **5. Watcher Swarm** | Observer | Observability, metrics, crash profiling | Read-only (`cat`, `grep`, `ps`, `top`) | All | All |
-| **6. Forge Carvers** | Builders | Primary code-generation logic loops | Default | All | All |
-| **7. Core Shapers** | Operators | Infrastructure, CI/CD, DevOps configuration | Default | All | All |
-| **8. Liaison Ants** | Fetchers | API routing, web fetching, external integrations | Default | All | All |
-| **9. Ledger Ants** | Bankers | Token counting, approvals, transaction logs | Default | All | All |
-| **10. Lore Burrow** | Archivists | MemPalace graphs, documentation | Default | All | All |
-| **11. Nameless Swarm** | Workers | Parallel map-reduce fanout processing | ❌ Denied | Explicit domains only | `data/*`, `temp/*` only |
+| **1. Queen** | Sovereign | Final workflow decision and high-risk transition authority | All | All | All |
+| **2. Eldest** | Architect | Architecture direction, technical standards, synthesis | Default | All | All |
+| **3. Assist-Ant** | Concierge | User-facing intake and final explanation | Denied by default | All | All |
+| **4. Command-ant** | Commander | Execution planning, assignment, and workflow sequencing | Denied by default | Limited | Plan/docs only |
+| **5. Vigil-ant** | Enforcer | Security auditing, veto, policy and approval gates | Broad (blocks `sudo`, `su`, `shutdown`) | All | All |
+| **6. Develop-ant** | Builder | Approved implementation and scoped mutation | Default | All | All |
+| **7. Logist-ant** | Operator | Infrastructure and operational readiness | Default | All | All |
+| **8. Consult-ant** | Reviewer | Verification, review, test execution, observability evidence | Verification allowlist | All | All |
+| **9. Inform-ant** | Fetcher | External information gathering and integration research | Denied by default | All | All |
+| **10. Cogniz-ant** | Memory | MemPalace, documentation, exact truth vs derived memory | Read-heavy | All | All |
+| **11. Account-ant** | Auditor | Token/cost accounting, budget gates, provenance ledgers | Read-heavy | Audit/billing allowlist | All |
+| **12. Oper-ant** | Worker | Restricted parallel fanout worker packets | Denied by default | Explicit domains only | `data/*`, `temp/*` only |
 
 > [!IMPORTANT]
-> **`NAMELESS_SWARM` is sandboxed by design.** Denied shell access. Explicit domain allowlist for HTTP. File access restricted to `data/` and `temp/` directories. These are disposable bulk workers — they get the least trust.
+> **`Oper-ant` is sandboxed by design.** Denied shell access. Explicit domain allowlist for HTTP. File access restricted to `data/` and `temp/` directories. These are disposable bulk workers and receive the least trust.
+
+Compatibility aliases:
+
+- `root_queen -> Queen`
+- `eldest_architect -> Eldest`
+- `assist_ant -> Assist-Ant`
+- `shield_generals -> Vigil-ant`
+- `forge_carvers -> Develop-ant`
+- `core_shapers -> Logist-ant`
+- `watcher_swarm -> Consult-ant`
+- `liaison_ants -> Inform-ant`
+- `lore_burrow -> Cogniz-ant`
+- `ledger_ants -> Account-ant`
+- `nameless_swarm -> Oper-ant`
 
 ### Permission Resolution Chain
 When a tool call is evaluated, permissions resolve in this order:
@@ -162,15 +183,15 @@ The `CompactionEngine` implements **6 strategies** with increasing aggression:
 
 | Caste | Messages Preserved | Rationale |
 |:---|:---:|:---|
-| `ROOT_QUEEN` | 20 | Queens need maximum context for sovereign decisions |
-| `SHIELD_GENERALS` | 14 | Security investigations need audit trail |
-| `ASSIST_ANT` | 12 | User-facing needs good conversation memory |
-| `FORGE_CARVERS` | 12 | Builders need code context |
-| `CORE_SHAPERS` | 10 | Operators need recent infra state |
-| `LORE_BURROW` | 10 | Archivists need documentation context |
-| `LIAISON_ANTS` | 8 | Fetchers are stateless by nature |
-| `LEDGER_ANTS` | 8 | Bankers track via external ledger |
-| `WATCHER_SWARM` | 8 | Watchers are disposable observers |
+| Queen | 20 | Sovereign decisions need maximum context |
+| Vigil-ant | 14 | Security investigations need audit trail |
+| Assist-Ant | 12 | User-facing work needs good conversation memory |
+| Develop-ant | 12 | Builders need code context |
+| Logist-ant | 10 | Operators need recent infrastructure state |
+| Cogniz-ant | 10 | Memory and documentation work needs source context |
+| Inform-ant | 8 | Fetchers are stateless by nature |
+| Account-ant | 8 | Auditors track via external ledger |
+| Consult-ant | 8 | Reviewers and observers should stay lightweight |
 
 **Time-based micro-compaction:** If the user is idle for >5 minutes, stale tool results are proactively cleared *before* the next request. This prevents expensive prompt cache rewrites when the user returns after a break.
 
@@ -219,7 +240,7 @@ Blocks:
 ### 5.6 — Interactive Approval
 Commands classified as `needs_approval` **halt the AgentLoop** via a Promise + resolver pattern:
 ```
-⚠ Forge Carvers wants to run: npm install express
+⚠ Develop-ant wants to run: npm install express
   Risk: needs_approval
   [Y] Allow  [N] Deny  [A] Allow all this session
 ```
@@ -263,27 +284,53 @@ The `EffortResolver` classifies tasks by complexity:
 
 ## 7. Decision Making & Execution Geometry
 
-The Colony prohibits agents from executing tasks blindly. The system adheres to the **11-Phase QA Cycle** defined by FormicaFlux.
+The Colony prohibits agents from executing tasks blindly. The system follows the
+**12-caste method workflow**: user intent is routed through explicit intake,
+architecture, command planning, security, accounting, implementation,
+verification, memory, final decision, and user-facing explanation boundaries.
 
-### The Champion Gating Pipeline
-Before `Forge` writes a single line of code, the task must pass through four internal defense nodes:
-1. **Steward:** Confirms the request adheres to resource expenditure and security thresholds.
-2. **Aegis:** Runs safety heuristics (the 35-rule Security Catalog snippet check).
-3. **Sentinel:** Ensures the task complies with the Manifesto.
-4. **Curator:** Formats the final validated intent for the Agent.
+### The Method Gating Pipeline
+
+Before `Develop-ant` mutates files or runs approved implementation work, the
+task must pass through method gates:
+
+1. **Assist-Ant:** Captures the operator intent and returns final user-facing truth.
+2. **Eldest:** Frames architecture, standards, and technical synthesis.
+3. **Command-ant:** Plans execution, assigns work, and sequences tasks without default mutation authority.
+4. **Vigil-ant:** Applies policy, security review, approval gates, and vetoes unsafe action.
+5. **Account-ant:** Checks budget, provenance, and cost/accounting constraints.
+6. **Develop-ant:** Performs scoped implementation only after the applicable approval gates.
+7. **Consult-ant:** Runs verification, review, observability checks, and evidence aggregation.
+8. **Cogniz-ant:** Preserves exact transcript truth separately from derived memory and MemPalace routing.
+9. **Queen:** Resolves high-risk transitions and final workflow decisions.
+
+The standard route is:
+
+```text
+Assist-Ant -> Eldest -> Command-ant -> Vigil-ant -> Account-ant -> Develop-ant -> Consult-ant -> Vigil-ant -> Cogniz-ant -> Queen -> Assist-Ant
+```
+
+High-risk work pauses before mutation until the human operator approves the
+action and `Vigil-ant` clears the policy boundary.
 
 > [!NOTE]
-> **Implementation reality check:** The Bible names 4 Champions; the code implements this behavior through 3 mechanisms without using those names: `ToolPermissionChecker.evaluate()`, `BashSecurityClassifier`, and `BashValidatorPipeline`. The end result is the same — no uninspected task reaches an agent.
+> **Implementation reality check:** The code implements this behavior through
+> `ToolPermissionChecker.evaluate()`, `BashSecurityClassifier`,
+> `BashValidatorPipeline`, workflow approval gates, and caste-aware permission
+> defaults. The end result is the same: no uninspected task reaches mutation.
 
 ### The 5-Minute RED-GREEN-REFACTOR TDD Loop
-Once logic reaches `Forge`, it kicks off an extremely tight execution cycle:
-1. `Vanguard` writes the Specs and Tests (RED).
-2. `Forge` implements the logic locally in an isolated Bun context.
-3. `Guardian` runs the AST static analyzer against the tests.
-4. If it fails, the error logs are cycled back to `Forge` without user interaction.
+
+Once logic reaches `Develop-ant`, it kicks off an extremely tight execution cycle:
+
+1. `Consult-ant` or `Command-ant` defines the focused verification target (RED).
+2. `Develop-ant` implements the narrowest scoped change locally.
+3. `Consult-ant` runs the focused verification and review checks.
+4. If it fails, the evidence cycles back to `Develop-ant` without expanding scope.
 5. If it hits maximum retries, the loop **aborts** to prevent "AI Slop."
 
-If all passes, the result is confidently materialized to the user.
+If all checks pass, `Queen` or `Assist-Ant` reports the evidence and remaining
+risk to the operator.
 
 ---
 
@@ -294,7 +341,7 @@ The Colony's terminal UI is called **The Ant Farm**. It is not decorative — it
 ### Layout
 ```
 ┌──────────────────────────────────────────────────────┐
-│  THE COLONY v2.0.0 │ Caste: FORGE_CARVERS │ $0.0042  │  ← StatusBar
+│  THE COLONY v2.0.0 │ Caste: Develop-ant │ $0.0042  │  ← StatusBar
 ├────────────────────────────────┬─────────────────────┤
 │                                │  Tool Activity       │
 │  Chat Panel                    │  ─────────────────   │
