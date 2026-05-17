@@ -1,4 +1,5 @@
 import type { SlashCommandContext } from "./gateway-contract";
+import { doctorCheckPrefix } from "./gateway-doctor";
 
 export interface GatewayProviderCommandPayload {
   output: string;
@@ -787,30 +788,6 @@ export function buildProviderCommandPayload(opts: {
   runtime: ProviderCommandRuntime | null;
   startupReport: SlashCommandContext["startupReport"];
   costTracker: unknown;
-  providerPerfSummaries: (
-    tracker: unknown,
-    runtime: unknown,
-  ) => {
-    summaries: ProviderPerfSummary[];
-    ambiguousRows: Array<{ row: ProviderPerfRow; providers: string[] }>;
-    unmappedRows: ProviderPerfRow[];
-  };
-  providerRecoveryHints: (
-    provider: string,
-    runtime: unknown,
-    report: SlashCommandContext["startupReport"],
-  ) => string[];
-  providerStartupChecks: (
-    provider: string,
-    report: SlashCommandContext["startupReport"],
-  ) => Array<{
-    name?: string;
-    message?: string;
-    fix?: string;
-    passed?: boolean;
-  }>;
-  formatFailoverEventLine: (event: NonNullable<ProviderCommandRuntime["recentFailovers"]>[number]) => string;
-  doctorCheckPrefix: (check: { passed?: boolean; severity?: string }) => string;
 }): GatewayProviderCommandPayload {
   const runtime = opts.runtime;
   if (!runtime) {
@@ -885,7 +862,7 @@ export function buildProviderCommandPayload(opts: {
       const incomingFailovers = recentFailovers.filter((event) => normalizeProviderAlias(event.toProvider ?? "") === provider);
       const outgoingFailovers = recentFailovers.filter((event) => normalizeProviderAlias(event.fromProvider ?? "") === provider);
       const matchedCount = incomingFailovers.length + outgoingFailovers.length;
-      const recoveryHints = opts.providerRecoveryHints(provider, runtime, opts.startupReport);
+      const recoveryHints = providerRecoveryHints(provider, runtime, opts.startupReport);
       return {
         output: renderFocusedProviderFailoversView({
           provider,
@@ -894,8 +871,8 @@ export function buildProviderCommandPayload(opts: {
           observedFailures: providerHealth?.failureCount ?? 0,
           matchedCount,
           totalRecentFailovers: recentFailovers.length,
-          incomingFailovers: incomingFailovers.map((event) => opts.formatFailoverEventLine(event)),
-          outgoingFailovers: outgoingFailovers.map((event) => opts.formatFailoverEventLine(event)),
+          incomingFailovers: incomingFailovers.map((event) => formatFailoverEventLine(event)),
+          outgoingFailovers: outgoingFailovers.map((event) => formatFailoverEventLine(event)),
           recoveryHints,
         }),
         data: {
@@ -907,7 +884,7 @@ export function buildProviderCommandPayload(opts: {
 
     return {
       output: renderProviderFailoversView({
-        recentFailovers: recentFailovers.map((event) => opts.formatFailoverEventLine(event)),
+        recentFailovers: recentFailovers.map((event) => formatFailoverEventLine(event)),
       }),
       data: {
         provider: null,
@@ -917,7 +894,7 @@ export function buildProviderCommandPayload(opts: {
   }
 
   if (view.kind === "perf") {
-    const perf = opts.providerPerfSummaries(opts.costTracker, runtime);
+    const perf = providerPerfSummaries(opts.costTracker, runtime);
     if (view.provider) {
       const summary = perf.summaries.find((entry) => entry.provider === view.provider);
       const ambiguousForProvider = perf.ambiguousRows.filter((entry) => entry.providers.includes(view.provider!));
@@ -976,10 +953,10 @@ export function buildProviderCommandPayload(opts: {
       .map(([name]) => normalizeProviderAlias(name));
     const incomingFailovers = recentFailovers.filter((event) => normalizeProviderAlias(event.toProvider ?? "") === provider);
     const outgoingFailovers = recentFailovers.filter((event) => normalizeProviderAlias(event.fromProvider ?? "") === provider);
-    const relatedChecks = opts.providerStartupChecks(provider, opts.startupReport);
-    const recoveryHints = opts.providerRecoveryHints(provider, runtime, opts.startupReport);
+    const relatedChecks = providerStartupChecks(provider, opts.startupReport);
+    const recoveryHints = providerRecoveryHints(provider, runtime, opts.startupReport);
     const configuredModel = providerConfiguredModel(runtime, provider);
-    const providerPerf = opts.providerPerfSummaries(opts.costTracker, runtime).summaries.find((entry) => entry.provider === provider);
+    const providerPerf = providerPerfSummaries(opts.costTracker, runtime).summaries.find((entry) => entry.provider === provider);
     return {
       output: renderFocusedProviderStatusView({
         provider,
@@ -996,10 +973,10 @@ export function buildProviderCommandPayload(opts: {
           : undefined,
         outgoingChain,
         incomingChain,
-        outgoingFailovers: outgoingFailovers.map((event) => opts.formatFailoverEventLine(event)),
-        incomingFailovers: incomingFailovers.map((event) => opts.formatFailoverEventLine(event)),
+        outgoingFailovers: outgoingFailovers.map((event) => formatFailoverEventLine(event)),
+        incomingFailovers: incomingFailovers.map((event) => formatFailoverEventLine(event)),
         relatedChecks: relatedChecks.map((check) => ({
-          prefix: opts.doctorCheckPrefix(check),
+          prefix: doctorCheckPrefix(check),
           name: check.name ?? "check",
           message: check.message ?? "",
           fix: check.fix,
@@ -1022,9 +999,9 @@ export function buildProviderCommandPayload(opts: {
 
   const currentProvider = normalizeProviderAlias(runtime.provider ?? "");
   const summaryHints = currentProvider
-    ? opts.providerRecoveryHints(currentProvider, runtime, opts.startupReport)
+    ? providerRecoveryHints(currentProvider, runtime, opts.startupReport)
     : [];
-  const timedProviders = opts.providerPerfSummaries(opts.costTracker, runtime).summaries.filter((entry) => entry.rows.length > 0);
+  const timedProviders = providerPerfSummaries(opts.costTracker, runtime).summaries.filter((entry) => entry.rows.length > 0);
   return {
     output: renderProviderSummaryView({
       selectedProvider: runtime.selectedProvider,
@@ -1044,7 +1021,7 @@ export function buildProviderCommandPayload(opts: {
         state: typeof health.state === "string" ? health.state : "unknown",
         failures: typeof health.failureCount === "number" ? health.failureCount : 0,
       })),
-      recentFailovers: recentFailovers.map((event) => opts.formatFailoverEventLine(event)),
+      recentFailovers: recentFailovers.map((event) => formatFailoverEventLine(event)),
       summaryHints,
       performanceLine: timedProviders.length > 0
         ? `Performance: ${timedProviders.length} provider(s) timed | slowest ${timedProviders[0].provider} ${timedProviders[0].totalApiDurationS.toFixed(1)}s | /provider perf`

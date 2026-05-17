@@ -107,7 +107,9 @@ async function verifyCompactionHandoffPreservesVerbatimTruth(): Promise<void> {
       "Live session no longer holds the original compacted user turn",
     );
 
-    const context = await memory.buildMemoryContext("alpha caveman source truth", loop.session);
+    const context = await memory.buildMemoryContext("alpha caveman recall bridge", loop.session, {
+      truthMode: "balanced",
+    });
     assert(context.includes("Keep exact sentence alpha for future recall"), "Exact compacted user wording still recalls from transcript");
     assert(context.includes("Derived compact recall"), "Compaction handoff also persists derived artifact recall");
   } finally {

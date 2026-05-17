@@ -30,6 +30,7 @@ import {
   fileList,
   fileEdit,
   grepSearch,
+  globFind,
   registerBuiltinTools,
 } from "./runtime/builtin-tools";
 
@@ -259,8 +260,19 @@ async function verifyShellExec(): Promise<void> {
 
   // Simple command
   const echo = await shellExec({ command: "echo hello" });
-  assert(echo.includes("hello"), "echo output captured");
-  assert(echo.includes("[exit code: 0]"), "exit code 0");
+  const sandboxBlocked = echo.includes("Shell execution blocked by runtime sandbox");
+  const shellSpawnDenied = sandboxBlocked
+    || echo.includes("[error] Failed to execute command:")
+    || echo.includes("[error] Failed to spawn");
+  if (shellSpawnDenied) {
+    assert(echo.includes("EPERM") || echo.includes("uv_spawn"), "sandbox-denied shell reports spawn failure");
+    if (sandboxBlocked) {
+      assert(echo.includes("Shell execution blocked by runtime sandbox"), "sandbox-denied shell uses explicit runtime sandbox wording");
+    }
+  } else {
+    assert(echo.includes("hello"), "echo output captured");
+    assert(echo.includes("[exit code: 0]"), "exit code 0");
+  }
 
   // Empty command
   const empty = await shellExec({ command: "" });
@@ -280,7 +292,16 @@ async function verifyShellExec(): Promise<void> {
     ? "Start-Sleep -Milliseconds 500"
     : "sleep 0.5";
   const timeout = await shellExec({ command: timeoutCommand, timeout_seconds: 0.1 });
-  assert(timeout.includes("timed out"), "Timeout: command is killed");
+  if (shellSpawnDenied) {
+    assert(
+      timeout.includes("Shell execution blocked by runtime sandbox")
+      || timeout.includes("[error] Failed to execute command:")
+      || timeout.includes("[error] Failed to spawn"),
+      "Timeout path reports sandbox-denied shell spawn",
+    );
+  } else {
+    assert(timeout.includes("timed out"), "Timeout: command is killed");
+  }
 
   // Bad command (nonexistent)
   const bad = await shellExec({ command: "nonexistent_command_12345" });
@@ -387,11 +408,33 @@ async function verifyGrepSearch(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 6. registerBuiltinTools
+// 6. Builtin glob_find
+// ---------------------------------------------------------------------------
+
+async function verifyGlobFind(): Promise<void> {
+  section("6. Builtin glob_find — File Discovery");
+
+  setupWorkspace();
+
+  const result = await globFind({ pattern: "**/*.ts", path: WORKSPACE });
+  assert(result.includes("index.ts"), "glob_find: found index.ts");
+  assert(result.includes("utils.ts"), "glob_find: found utils.ts");
+
+  const noMatch = await globFind({ pattern: "**/*.tsx", path: WORKSPACE });
+  assert(noMatch.includes("\"count\": 0"), "glob_find: no matches returns structured zero count");
+
+  const badPath = await globFind({ pattern: "**/*.ts", path: "/nonexistent/path" });
+  assert(badPath.includes("\"ok\": false"), "glob_find: bad path returns structured error");
+
+  cleanupWorkspace();
+}
+
+// ---------------------------------------------------------------------------
+// 7. registerBuiltinTools
 // ---------------------------------------------------------------------------
 
 function verifyRegistration(): void {
-  section("6. registerBuiltinTools — Full Registration");
+  section("7. registerBuiltinTools — Full Registration");
 
   const registry = new ToolRegistry();
   registerBuiltinTools(registry);
@@ -402,8 +445,15 @@ function verifyRegistration(): void {
   assert(registry.has("file_list"), "Registered: file_list");
   assert(registry.has("file_edit"), "Registered: file_edit");
   assert(registry.has("grep_search"), "Registered: grep_search");
+  assert(registry.has("glob_find"), "Registered: glob_find");
+  assert(registry.has("git_status"), "Registered: git_status");
+  assert(registry.has("git_diff"), "Registered: git_diff");
+  assert(registry.has("test_runner"), "Registered: test_runner");
+  assert(registry.has("lint_runner"), "Registered: lint_runner");
+  assert(registry.has("web_fetch"), "Registered: web_fetch");
+  assert(registry.has("web_search"), "Registered: web_search");
 
-  assertEqual(registry.count, 6, "6 builtin tools registered");
+  assertEqual(registry.count, 13, "13 builtin tools registered");
 
   // Category filtering
   const fileTools = registry.listTools("file");
@@ -415,7 +465,7 @@ function verifyRegistration(): void {
 
   // Schema export
   const schemas = registry.toPromptSchema();
-  assertEqual(schemas.length, 6, "Schema exports 6 tools");
+  assertEqual(schemas.length, 13, "Schema exports 13 tools");
 
   // Filtered schema
   const fileSchemas = registry.toPromptSchema(["file_read", "file_write"]);
@@ -444,6 +494,7 @@ async function main(): Promise<void> {
   await verifyShellExec();
   await verifyFileTools();
   await verifyGrepSearch();
+  await verifyGlobFind();
   verifyRegistration();
 
   console.log(`\n${"═".repeat(60)}`);

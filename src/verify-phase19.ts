@@ -100,13 +100,17 @@ async function verifyAsyncLayersAndMemoryStack(): Promise<void> {
   const palacePath = join(dir, "palace");
   const identityPath = join(dir, "identity.txt");
   const sourceFile = join(dir, "auth.md");
+  const eventSourceFile = join(dir, "auth-events.md");
 
   try {
     await Bun.write(identityPath, "I am Assist-Ant. Keep truth exact.");
     await Bun.write(sourceFile, "auth migration source");
+    await Bun.write(eventSourceFile, "auth event source");
 
     const file = Bun.file(sourceFile);
     const stat = await file.stat();
+    const eventFile = Bun.file(eventSourceFile);
+    const eventStat = await eventFile.stat();
 
     const store = await PalaceStore.open({ palacePath, create: true });
     try {
@@ -137,6 +141,19 @@ async function verifyAsyncLayersAndMemoryStack(): Promise<void> {
           emotionalWeight: 0.5,
           metadata: {},
         },
+        {
+          id: "",
+          content: "Event: token rotation rehearsal failed before the final auth migration.",
+          wing: "project_alpha",
+          room: "auth",
+          hall: "hall_events",
+          sourceFile: eventSourceFile,
+          sourceMtime: eventStat.mtime ? eventStat.mtime.getTime() / 1000 : undefined,
+          date: "2026-04-17",
+          importance: 3,
+          emotionalWeight: 0.5,
+          metadata: {},
+        },
       ]);
     } finally {
       store.close();
@@ -146,22 +163,118 @@ async function verifyAsyncLayersAndMemoryStack(): Promise<void> {
     const wakeUp = await stack.wakeUp("project_alpha");
     const recall = await stack.recall({ wing: "project_alpha", room: "auth" });
     const search = await stack.search("token rotation");
+    const sourceFilteredSearch = await stack.search("token rotation", {
+      sourceFile: eventSourceFile,
+      nResults: 5,
+    } as { sourceFile: string; nResults: number });
     const status = await stack.status();
 
     assert(wakeUp.includes("I am Assist-Ant"), "wakeUp includes async identity layer");
     assert(wakeUp.includes("ESSENTIAL STORY"), "wakeUp includes L1 essential story");
     assert(recall.includes("ON-DEMAND"), "recall returns async L2 content");
     assert(search.includes("SEARCH RESULTS"), "search returns async L3 content");
-    assertEqual(status.totalDrawers, 2, "status counts drawers through async store open");
+    assert(sourceFilteredSearch.includes(eventSourceFile), "MemoryStack search accepts source-file routing filter");
+    assert(!sourceFilteredSearch.includes(sourceFile), "MemoryStack source-file routing excludes sibling source hits");
+    assertEqual(status.totalDrawers, 3, "status counts drawers through async store open");
     assert(status.l0Identity.exists, "status sees async identity file");
     assert(status.l0Identity.tokens > 0, "status computes async identity token estimate");
+    assertEqual(status.hierarchy.wings.project_alpha, 3, "status exposes wing hierarchy counts");
+    assertEqual(status.hierarchy.rooms.auth, 3, "status exposes room hierarchy counts");
+    assertEqual(status.hierarchy.halls.hall_facts, 1, "status exposes hall hierarchy counts");
+    assertEqual(status.hierarchy.sources[eventSourceFile], 1, "status exposes source-file hierarchy counts");
+    assertEqual(status.hierarchy.taxonomy.project_alpha.auth.hall_events, 1, "status exposes wing-room-hall taxonomy");
+  } finally {
+    await cleanupDir(dir);
+  }
+}
+
+async function verifyHallAwareRetrievalAndHierarchyScoring(): Promise<void> {
+  section("3. Hall Filters + Hierarchy Scoring");
+
+  const dir = await mkdtemp(join(tmpdir(), "colony-mempalace-halls-"));
+  const palacePath = join(dir, "palace");
+
+  try {
+    const store = await PalaceStore.open({ palacePath, create: true });
+    try {
+      store.addBatch([
+        {
+          id: "",
+          content: "Decision: auth token rotation remains the hard rule for operator safety.",
+          wing: "project_alpha",
+          room: "auth",
+          hall: "hall_facts",
+          sourceFile: "facts.md",
+          importance: 5,
+          emotionalWeight: 0.9,
+          metadata: { tier: "canonical" },
+        },
+        {
+          id: "",
+          content: "Decision: auth token rotation remains the hard rule for operator safety.",
+          wing: "project_alpha",
+          room: "auth",
+          hall: "hall_events",
+          sourceFile: "events.md",
+          importance: 1,
+          emotionalWeight: 0.1,
+          metadata: { tier: "timeline" },
+        },
+        {
+          id: "",
+          content: "Decision: auth token rotation remains the hard rule for operator safety.",
+          wing: "project_alpha",
+          room: "auth",
+          hall: "hall_facts",
+          sourceFile: "facts-low.md",
+          importance: 2,
+          emotionalWeight: 0.2,
+          metadata: { tier: "secondary" },
+        },
+      ]);
+
+      const hallFiltered = store.search("token rotation", {
+        wing: "project_alpha",
+        room: "auth",
+        hall: "hall_facts",
+        nResults: 5,
+      });
+
+      assertEqual(hallFiltered.filters.hall, "hall_facts", "search result exposes hall filter");
+      assertEqual(hallFiltered.totalBeforeFilter, 3, "search reports total lexical matches before hall filter");
+      assertEqual(hallFiltered.results.length, 2, "hall filter narrows results");
+      assert(hallFiltered.results.every((hit) => hit.hall === "hall_facts"), "hall-filtered hits stay in requested hall");
+      assertEqual(hallFiltered.results[0]?.sourceFile, "facts.md", "higher-importance fact outranks weaker lexical twin");
+
+      const stack = new MemoryStack(palacePath);
+      const recall = await stack.recall({ wing: "project_alpha", room: "auth", hall: "hall_facts", nResults: 5 });
+      const rawHits = await stack.l3.searchRaw("token rotation", {
+        wing: "project_alpha",
+        room: "auth",
+        hall: "hall_facts",
+        nResults: 5,
+      });
+      const rendered = await stack.search("token rotation", {
+        wing: "project_alpha",
+        room: "auth",
+        hall: "hall_facts",
+        nResults: 5,
+      });
+
+      assert(recall.includes("hall_facts"), "L2 recall prints hall-aware labels");
+      assertEqual(rawHits.length, 2, "L3 raw search accepts hall filter");
+      assert(rawHits.every((hit) => hit.hall === "hall_facts"), "L3 raw hits keep requested hall");
+      assert(rendered.includes("project_alpha/auth/hall_facts"), "L3 rendered search prints hall-aware path");
+    } finally {
+      store.close();
+    }
   } finally {
     await cleanupDir(dir);
   }
 }
 
 async function verifyAsyncPalaceGraph(): Promise<void> {
-  section("3. Async Palace Graph");
+  section("4. Async Palace Graph");
 
   const dir = await mkdtemp(join(tmpdir(), "colony-mempalace-graph-"));
   const palacePath = join(dir, "palace");
@@ -220,7 +333,7 @@ async function verifyAsyncPalaceGraph(): Promise<void> {
 }
 
 async function verifyNoSyncFsHelpersRemain(): Promise<void> {
-  section("4. No Sync Filesystem Helpers Remain");
+  section("5. No Sync Filesystem Helpers Remain");
 
   const targets = [
     "./src/mempalace/store.ts",
@@ -242,6 +355,7 @@ async function main(): Promise<void> {
 
   await verifyAsyncStoreOpenAndMining();
   await verifyAsyncLayersAndMemoryStack();
+  await verifyHallAwareRetrievalAndHierarchyScoring();
   await verifyAsyncPalaceGraph();
   await verifyNoSyncFsHelpersRemain();
 

@@ -42,6 +42,7 @@ import {
   formatPermissions,
   SlashCommandParser,
 } from "./gateway";
+import { buildGatewayCurrentSessionSnapshot } from "./gateway-session-snapshot";
 import { createAgentSession, addMessage } from "./runtime/session";
 import {
   createLLMResponse,
@@ -394,7 +395,7 @@ function verifyPromptBuilder(): void {
     caste: Caste.ROOT_QUEEN,
     includeManifesto: true,
   });
-  assert(queenPrompt.includes("## Identity: Root Queen"), "Queen: identity header included");
+  assert(queenPrompt.includes("## Identity: Queen"), "Queen: identity header included");
   assert(queenPrompt.includes("supreme coordinator"), "Queen: identity description");
   assert(queenPrompt.includes("Manifesto"), "Queen: manifesto included");
   assert(queenPrompt.includes("Safety before success"), "Queen: manifesto principles");
@@ -404,7 +405,7 @@ function verifyPromptBuilder(): void {
     caste: Caste.FORGE_CARVERS,
     toolNames: ["file_read", "file_write", "shell_exec"],
   });
-  assert(forgePrompt.includes("Forge Carver"), "Forge: identity");
+  assert(forgePrompt.includes("Develop-ant"), "Forge compatibility: method identity");
   assert(forgePrompt.includes("Builder and implementer"), "Forge: caste guidance role");
   assert(forgePrompt.includes("file_read"), "Forge: tools listed");
   assert(forgePrompt.includes("3 tools"), "Forge: tool count");
@@ -413,7 +414,7 @@ function verifyPromptBuilder(): void {
   const shieldPrompt = PromptBuilder.buildSystemPrompt({
     caste: Caste.SHIELD_GENERALS,
   });
-  assert(shieldPrompt.includes("Shield General"), "Shield: identity");
+  assert(shieldPrompt.includes("Vigil-ant"), "Shield compatibility: method identity");
   assert(shieldPrompt.includes("skeptical"), "Shield: personality");
 
   // Assist Ant with custom instructions
@@ -616,8 +617,10 @@ function verifyGateway(): void {
   assertEqual(parseCommand("/sessions").type, "sessions", "/sessions");
   assertEqual(parseCommand("/history latest 5").type, "history", "/history");
   assertEqual(parseCommand("/artifact \"C:/tmp/result.txt\"").type, "artifact", "/artifact");
+  assertEqual(parseCommand("/artifact \"C:/tmp/result file.txt\"").args[0], "C:/tmp/result file.txt", "/artifact preserves quoted path arguments");
   assertEqual(parseCommand("/budget 5").type, "budget", "/budget");
   assertEqual(parseCommand("/model claude-opus-4-6").type, "model", "/model");
+  assertEqual(parseCommand("/memory exact").type, "memory", "/memory");
   assertEqual(parseCommand("/tools").type, "tools", "/tools");
   assertEqual(parseCommand("/cancel").type, "cancel", "/cancel");
   assertEqual(parseCommand("/clear").type, "clear", "/clear");
@@ -631,6 +634,7 @@ function verifyGateway(): void {
   assertEqual(parseCommand("/perms").type, "permissions", "/perms → permissions alias");
   assertEqual(parseCommand("/doctor").type, "doctor", "/doctor");
   assertEqual(parseCommand("/diag").type, "doctor", "/diag alias");
+  assertEqual(parseCommand("/workflow").type, "workflow", "/workflow");
   assertEqual(parseCommand("/exit").type, "exit", "/exit");
   assertEqual(parseCommand("/quit").type, "exit", "/quit → exit alias");
 
@@ -642,15 +646,94 @@ function verifyGateway(): void {
   assertEqual(parseCommand("/swarm build api").raw, "/swarm build api", "Raw input preserved");
 
   // Format helpers
+  const currentSnapshot = buildGatewayCurrentSessionSnapshot(
+    {
+      sessionId: "ses_live_latest",
+      agentId: "assist-ant",
+      caste: "assist_ant",
+      history: [
+        createSystemMessage("system"),
+        {
+          type: "user",
+          content: "Need answer when run comes back.",
+          timestamp: "2026-04-18T10:05:00.000Z",
+        },
+      ],
+    },
+    [
+      {
+        sessionId: "ses_saved_old",
+        agentId: "assist-ant",
+        caste: "assist_ant",
+        savedAt: "2026-04-18T10:00:00.000Z",
+        lastMessageAt: "2026-04-18T10:00:00.000Z",
+        messageCount: 3,
+        tokensUsed: 500,
+        costUsd: 0.01,
+        interruption: "none",
+        hasCheckpoint: true,
+        previewText: "Older saved state",
+        previewRole: "assistant",
+      },
+    ],
+  );
+  assertEqual(currentSnapshot.currentSessionId, "ses_live_latest", "Session snapshot keeps live session id");
+  assertEqual(currentSnapshot.currentPendingState, "interrupted_prompt", "Session snapshot keeps live interruption state");
+  assertEqual(currentSnapshot.latestCurrentSessionId, "ses_live_latest", "Session snapshot marks newer live session as latest");
+  assertEqual(currentSnapshot.latestPersistedAliasSessionId, null, "Session snapshot drops persisted latest alias when live session is newer");
+  assert(currentSnapshot.currentHistoryAliases.includes("pending"), "Session snapshot keeps pending alias for interrupted live session");
+  assert(currentSnapshot.currentHistoryAliases.includes("latest"), "Session snapshot keeps latest alias for newer live session");
+  assert(currentSnapshot.currentHistoryCommands.includes("/history pending 8"), "Session snapshot keeps pending history command");
+  assert(currentSnapshot.currentHistoryCommands.includes("/history latest 8"), "Session snapshot keeps latest history command");
+
+  const persistedSnapshot = buildGatewayCurrentSessionSnapshot(
+    {
+      sessionId: "ses_saved_new",
+      agentId: "assist-ant",
+      caste: "assist_ant",
+      history: [
+        createSystemMessage("system"),
+        {
+          type: "assistant",
+          content: "Saved state already latest.",
+          timestamp: "2026-04-18T10:00:00.000Z",
+        },
+      ],
+    },
+    [
+      {
+        sessionId: "ses_saved_new",
+        agentId: "assist-ant",
+        caste: "assist_ant",
+        savedAt: "2026-04-18T10:00:00.000Z",
+        lastMessageAt: "2026-04-18T10:00:00.000Z",
+        messageCount: 3,
+        tokensUsed: 500,
+        costUsd: 0.01,
+        interruption: "interrupted_prompt",
+        hasCheckpoint: true,
+        previewText: "Need answer when run comes back.",
+        previewRole: "user",
+      },
+    ],
+  );
+  assertEqual(persistedSnapshot.latestPersistedAliasSessionId, "ses_saved_new", "Session snapshot keeps persisted latest alias when saved session is current");
+  assertEqual(persistedSnapshot.currentSessionIdForResume, "ses_saved_new", "Session snapshot exposes live session id for resume guard");
+
   const helpOutput = formatHelp();
   assert(helpOutput.includes("/swarm"), "Help includes /swarm");
   assert(helpOutput.includes("/sessions"), "Help includes /sessions");
   assert(helpOutput.includes("/history"), "Help includes /history");
   assert(helpOutput.includes("/artifact"), "Help includes /artifact");
   assert(helpOutput.includes("/model"), "Help includes /model");
+  assert(helpOutput.includes("/memory"), "Help includes /memory");
+  assert(helpOutput.includes("routing/palace views"), "Help exposes /memory routing and palace views");
+  assert(helpOutput.includes("prefer-exact"), "Help exposes /memory prefer-exact mode");
   assert(helpOutput.includes("/perf"), "Help includes /perf");
   assert(helpOutput.includes("/tools"), "Help includes /tools");
   assert(helpOutput.includes("/events"), "Help includes /events");
+  assert(helpOutput.includes("/workflow"), "Help includes /workflow");
+  assert(helpOutput.includes("workflow runs"), "Help exposes /workflow runtime visibility");
   assert(helpOutput.includes("/cancel"), "Help includes /cancel");
   assert(helpOutput.includes("/exit"), "Help includes /exit");
   assert(helpOutput.includes("pending/current state"), "Help exposes /sessions pending/current filters");
@@ -668,10 +751,10 @@ function verifyGateway(): void {
     state: "ACTIVE",
   });
   assert(statusOutput.includes("ses_abc123"), "Status shows session ID");
-  assert(statusOutput.includes("ASSIST_ANT"), "Status shows caste");
+  assert(statusOutput.includes("Assist-Ant"), "Status shows method caste");
 
   const casteOutput = formatCaste("FORGE_CARVERS", "The builder caste");
-  assert(casteOutput.includes("FORGE_CARVERS"), "Caste display correct");
+  assert(casteOutput.includes("Develop-ant"), "Caste display prefers method label");
 
   const permsOutput = formatPermissions(
     "ASSIST_ANT",
@@ -729,6 +812,7 @@ async function verifyCommandExecution(): Promise<void> {
       model: "llama3.2",
       selectedProvider: "local",
       selectedModel: "llama3.2",
+      memoryTruthModeOverride: "prefer_exact",
       providerDefaults: {
         anthropic: "claude-sonnet-4-5",
         local: "llama3.2",
@@ -750,6 +834,20 @@ async function verifyCommandExecution(): Promise<void> {
         errorType: "LLMConnectionError",
         errorMessage: "connect refused",
         timestamp: Date.now(),
+      }],
+      queuedPromptCount: 1,
+      queuedPromptPreview: "queued follow-up prompt",
+      workflowRuns: [{
+        runId: "wfr_release_1",
+        definitionId: "wf_release",
+        title: "Release Workflow",
+        status: "paused",
+        completedSteps: 1,
+        totalSteps: 4,
+        awaitingStepId: "approval",
+        artifactCount: 1,
+        checkpointCount: 2,
+        updatedAt: Date.parse("2026-04-16T09:03:00.000Z"),
       }],
     },
     workspace: {
@@ -905,6 +1003,7 @@ async function verifyCommandExecution(): Promise<void> {
   assert(status.output.includes("Runtime:"), "/status includes runtime block");
   assert(status.output.includes("Selected provider: local"), "/status includes selected provider");
   assert(status.output.includes("Selected model: llama3.2"), "/status includes selected model");
+  assert(status.output.includes("Memory recall: prefer-exact | /memory"), "/status includes memory recall mode");
   assert(status.output.includes("Approvals:"), "/status includes approvals block");
   assert(status.output.includes("Exact-signature session rules: 2"), "/status includes exact-signature session rule count");
   assert(status.output.includes("Pending request: file_read | risk:low | category:read"), "/status includes pending approval request detail");
@@ -936,7 +1035,7 @@ async function verifyCommandExecution(): Promise<void> {
   assert(status.output.includes("Checks: 1 error(s), 2 warning(s)"), "/status includes startup count summary");
   assert(status.output.includes("Current issue: Config: llm config path - Configured LLM config path not found: /tmp/missing.json"), "/status includes leading startup issue");
   assert(status.output.includes("Fix: Fix COLONY_LLM_CONFIG or remove stale path setting."), "/status includes leading startup fix");
-  assert(status.output.includes("Inspect: /doctor | /doctor errors | /doctor warnings"), "/status includes doctor inspect hint");
+  assert(status.output.includes("Inspect: /doctor | /doctor config | /doctor errors | /doctor warnings | /doctor first-run"), "/status includes focused doctor inspect hint");
   assert(status.output.includes("Saved Status:"), "/status includes saved session summary section");
   assert(status.output.includes("Count: 3"), "/status includes saved session count");
   assert(status.output.includes("Interrupted: 1"), "/status includes interrupted session count");
@@ -974,12 +1073,28 @@ async function verifyCommandExecution(): Promise<void> {
   assert(status.output.includes("Tools:"), "/status includes runtime tool summary");
   assert(status.output.includes("Active now: 2"), "/status includes active tool count");
   assert(status.output.includes("Allowed: 1 | Denied: 1"), "/status includes allowed and denied tool counts");
+  assert(status.output.includes("Queued prompt: 1 pending | queued follow-up prompt"), "/status includes queued prompt truth");
+  assert(status.output.includes("Workflows:"), "/status includes workflow visibility block");
+  assert(status.output.includes("Active/paused: 1"), "/status includes active workflow count");
+  assert(status.output.includes("Latest workflow: wfr_release_1 | paused | 1/4 steps | artifacts 1 | checkpoints 2"), "/status includes latest workflow progress");
+  assert(status.output.includes("Awaiting: approval"), "/status includes workflow approval blocker");
+  assert(status.output.includes("Inspect workflows: /workflow | /workflow active | /workflow latest"), "/status includes workflow inspect hints");
   assert(status.output.includes("Inspect activity: /tools | /tools approvals | /tools recent | /tools artifacts | /tools perf"), "/status includes tool inspect paths");
   assert(status.output.includes("Inspect policy: /permissions | /permissions active | /permissions allowed | /permissions denied | /permissions rules"), "/status includes permission inspect paths");
   assert(status.output.includes("Budget:"), "/status includes budget section");
   assert(status.output.includes("Cap: $5.00"), "/status includes budget cap");
   assert(status.output.includes("Remaining: $"), "/status includes budget remaining amount");
   assert(status.output.includes("Spend: "), "/status includes budget spend percent");
+  assert(status.output.includes("Operator Next:"), "/status includes consolidated operator next-action block");
+  assert(status.output.includes("- Active run: /cancel | /events recent | /status runtime"), "/status operator block includes active-run controls");
+  assert(status.output.includes("- Queued prompt: /status runtime | /history current 8"), "/status operator block includes queued prompt follow-up");
+  assert(status.output.includes("- Pending approval: /tools approvals | /permissions rules"), "/status operator block includes pending approval controls");
+  assert(status.output.includes("- Startup issue: /doctor errors | /doctor warnings | /doctor first-run"), "/status operator block includes startup drill-down controls");
+  assert(status.output.includes("- Provider recovery: /provider current | /provider failovers | /doctor"), "/status operator block includes provider recovery controls");
+  assert(status.output.includes("- Compaction failure: /compact status | /compact recent | /doctor"), "/status operator block includes compaction failure controls");
+  assert(status.output.includes("- Runtime events: /events recent | /events failures | /events perf"), "/status operator block includes runtime event controls");
+  assert(status.output.includes("- Workflow attention: /workflow active | /workflow latest"), "/status operator block includes workflow controls");
+  assert(status.output.includes("- Performance baseline: /perf | /cost perf | /events perf"), "/status operator block includes performance baseline controls");
   assert(status.output.includes("Views: /status | /status session | /status saved | /status runtime"), "/status summary teaches drill-down views");
 
   const statusSession = parser.tryHandle("/status session");
@@ -999,7 +1114,11 @@ async function verifyCommandExecution(): Promise<void> {
   const statusRuntime = parser.tryHandle("/status runtime");
   assert(statusRuntime.output.includes("Runtime Status:"), "/status runtime prints runtime header");
   assert(statusRuntime.output.includes("Approvals:"), "/status runtime keeps approvals block");
+  assert(statusRuntime.output.includes("Memory recall: prefer-exact | /memory"), "/status runtime keeps memory recall truth");
   assert(statusRuntime.output.includes("Cost Summary:"), "/status runtime keeps cost block");
+  assert(statusRuntime.output.includes("Queued prompt: 1 pending | queued follow-up prompt"), "/status runtime keeps queued prompt truth");
+  assert(statusRuntime.output.includes("Workflows:"), "/status runtime keeps workflow block");
+  assert(statusRuntime.output.includes("Latest workflow: wfr_release_1 | paused | 1/4 steps | artifacts 1 | checkpoints 2"), "/status runtime keeps workflow progress");
   assert(statusRuntime.output.includes("Hooks: 1 attached | 2 recent"), "/status runtime keeps hook summary");
   assert(statusRuntime.output.includes("Latest hook: PostCompact | standard"), "/status runtime keeps latest hook summary");
   assert(statusRuntime.output.includes("Inspect: /hooks | /hooks recent | /hooks perf | /hooks kinds"), "/status runtime keeps hook inspect hint");
@@ -1010,6 +1129,11 @@ async function verifyCommandExecution(): Promise<void> {
   assert(statusRuntime.output.includes("Exact-signature session rules: 2"), "/status runtime keeps exact-signature rule count");
   assert(statusRuntime.output.includes("Inspect activity: /tools | /tools approvals | /tools recent | /tools artifacts | /tools perf"), "/status runtime keeps tool inspect hint");
   assert(statusRuntime.output.includes("Inspect policy: /permissions | /permissions active | /permissions allowed | /permissions denied | /permissions rules"), "/status runtime keeps permission inspect hint");
+  assert(statusRuntime.output.includes("Operator Next:"), "/status runtime keeps consolidated operator next-action block");
+  assert(statusRuntime.output.includes("- Active run: /cancel | /events recent | /status runtime"), "/status runtime operator block keeps active-run controls");
+  assert(statusRuntime.output.includes("- Pending approval: /tools approvals | /permissions rules"), "/status runtime operator block keeps pending approval controls");
+  assert(statusRuntime.output.includes("- Workflow attention: /workflow active | /workflow latest"), "/status runtime operator block keeps workflow controls");
+  assert(statusRuntime.output.includes("- Runtime events: /events recent | /events failures | /events perf"), "/status runtime operator block keeps runtime event controls");
   assert(!statusRuntime.output.includes("Saved Status:"), "/status runtime omits saved-session block");
   assert(!statusRuntime.output.includes("Session Status:"), "/status runtime omits live-session block");
   assert(statusRuntime.output.includes("Views: /status | /status session | /status saved | /status runtime"), "/status runtime keeps drill-down views");
@@ -1017,6 +1141,23 @@ async function verifyCommandExecution(): Promise<void> {
   const statusUnknown = parser.tryHandle("/status cave");
   assert(statusUnknown.isError === true, "/status unknown view errors");
   assert(statusUnknown.output.includes("Unknown status view 'cave'."), "/status unknown view names bad view");
+
+  const workflow = parser.tryHandle("/workflow");
+  assertEqual(workflow.command, "workflow", "Parser executes /workflow");
+  assert(workflow.output.includes("Workflow Runs:"), "/workflow prints workflow header");
+  assert(workflow.output.includes("Active/paused: 1"), "/workflow prints active workflow count");
+  assert(workflow.output.includes("wfr_release_1 | Release Workflow | paused | 1/4 steps"), "/workflow prints run progress");
+  assert(workflow.output.includes("Awaiting: approval"), "/workflow prints awaiting approval step");
+  assert(workflow.output.includes("Views: /workflow | /workflow active | /workflow latest"), "/workflow teaches workflow views");
+
+  const workflowLatest = parser.tryHandle("/workflow latest");
+  assert(workflowLatest.output.includes("Latest Workflow:"), "/workflow latest prints latest header");
+  assert(workflowLatest.output.includes("Run: wfr_release_1"), "/workflow latest shows run id");
+  assert(workflowLatest.output.includes("Artifacts: 1"), "/workflow latest shows artifact count");
+
+  const workflowUnknown = parser.tryHandle("/workflow cave");
+  assert(workflowUnknown.isError === true, "/workflow unknown view errors");
+  assert(workflowUnknown.output.includes("Unknown workflow view 'cave'."), "/workflow unknown view names bad view");
   assert(statusUnknown.output.includes("Views: /status | /status session | /status saved | /status runtime"), "/status unknown view teaches drill-down views");
 
   const statusPausedActive = new SlashCommandParser({
@@ -1039,6 +1180,31 @@ async function verifyCommandExecution(): Promise<void> {
   assert(statusPausedActive.output.includes("Run active: yes"), "/status uses active-run state even when thinking flag is false");
   assert(statusPausedActive.output.includes("Interrupt: /cancel | Ctrl+C | Esc"), "/status keeps active-run interrupt hint while paused");
   assert(statusPausedActive.output.includes("Inspect: /status, /cost, /history current 8, /history pending 8, /history latest 8, or /history ses_paused_active 8"), "/status keeps current, pending, latest, and exact inspection hints while paused");
+
+  const statusStopping = new SlashCommandParser({
+    session: {
+      sessionId: "ses_stopping_active",
+      agentId: "agent-1",
+      caste: "assist_ant",
+      history: [
+        { type: "user", content: "stopping now", timestamp: "2026-04-17T12:07:00.000Z" },
+      ],
+    },
+    runtime: {
+      provider: "local",
+      model: "llama3.2",
+      circuitState: "closed",
+      activeRun: true,
+      isThinking: false,
+      interruptRequested: true,
+      queuedPromptCount: 1,
+      queuedPromptPreview: "finish queued migration",
+    },
+  }).tryHandle("/status");
+  assert(statusStopping.output.includes("Run active: yes"), "/status keeps run active while shutdown is pending");
+  assert(statusStopping.output.includes("Interrupt: cancellation requested; waiting for shutdown."), "/status tells truth when active run is stopping");
+  assert(statusStopping.output.includes("Queued prompt: 1 pending | finish queued migration"), "/status stopping view keeps queued prompt truth");
+  assert(statusStopping.output.includes("Inspect: /status, /cost, /history current 8, /history pending 8, /history latest 8, or /history ses_stopping_active 8"), "/status keeps current-session inspect hints while shutdown is pending");
 
   const statusCurrentPersisted = new SlashCommandParser({
     session: {
@@ -1163,10 +1329,12 @@ async function verifyCommandExecution(): Promise<void> {
     },
     approvals: {
       pending: true,
+      sessionRuleCount: 2,
       toolName: "shell_exec",
       category: "write",
       riskLevel: "high",
       summary: "Execute shell command: bun run verify:all",
+      signature: "shell_exec:toolsig1234abcd",
       reason: "Command mutates workspace files.",
       warningCount: 2,
     },
@@ -1182,17 +1350,22 @@ async function verifyCommandExecution(): Promise<void> {
   assert(tools.output.includes("Views: /tools | /tools approvals | /tools recent | /tools artifacts | /tools perf"), "/tools includes direct drill-down views");
   assert(tools.output.includes("Pending approval: shell_exec"), "/tools includes pending approval tool");
   assert(tools.output.includes("Risk: high | Category: write"), "/tools includes pending approval risk and category");
+  assert(tools.output.includes("Signature: shell_exec:toolsig1234abcd"), "/tools includes exact approval signature");
   assert(tools.output.includes("Summary: Execute shell command: bun run verify:all"), "/tools includes pending approval summary");
   assert(tools.output.includes("Reason: Command mutates workspace files."), "/tools includes pending approval reason");
   assert(tools.output.includes("Control: y/n/a/s/esc"), "/tools includes approval control shortcuts");
+  assert(tools.output.includes("Exact-call session rules: 2 (/permissions rules)"), "/tools includes exact-signature session rule count");
   assert(tools.output.includes("1. shell_exec | Denied by operator | high/write | Execute shell command: rm -rf ."), "/tools surfaces recent denied tool result");
   assert(tools.output.includes("2. file_write | saved artifact | 15,321 chars"), "/tools surfaces recent externalized tool result");
   assert(tools.output.includes(`Reopen: /artifact "${toolsArtifactPath}"`), "/tools includes exact artifact reopen command");
+  assert(tools.output.includes("Inspect latest: /artifact latest"), "/tools includes latest artifact shortcut");
   assert(tools.output.includes("3. shell_exec | ok | 321ms | Build finished cleanly."), "/tools surfaces recent successful tool result");
 
   const toolApprovals = toolsParser.tryHandle("/tools approvals");
   assert(toolApprovals.output.includes("Approval state:"), "/tools approvals prints approvals header");
   assert(toolApprovals.output.includes("Pending approval: shell_exec"), "/tools approvals includes pending approval tool");
+  assert(toolApprovals.output.includes("Signature: shell_exec:toolsig1234abcd"), "/tools approvals includes exact approval signature");
+  assert(toolApprovals.output.includes("Exact-call session rules: 2 (/permissions rules)"), "/tools approvals includes exact-signature session rule count");
   assert(toolApprovals.output.includes("Inspect policy: /permissions"), "/tools approvals keeps policy inspect path");
   assert(toolApprovals.output.includes("Views: /tools | /tools approvals | /tools recent | /tools artifacts | /tools perf"), "/tools approvals includes drill-down views");
 
@@ -1200,6 +1373,7 @@ async function verifyCommandExecution(): Promise<void> {
   assert(toolRecent.output.includes("Recent tool activity:"), "/tools recent prints activity header");
   assert(toolRecent.output.includes("1. shell_exec | Denied by operator | high/write | Execute shell command: rm -rf ."), "/tools recent includes denied activity");
   assert(toolRecent.output.includes(`Reopen: /artifact "${toolsArtifactPath}"`), "/tools recent keeps exact artifact reopen command");
+  assert(toolRecent.output.includes("Inspect latest: /artifact latest"), "/tools recent includes latest artifact shortcut");
   assert(toolRecent.output.includes("Views: /tools | /tools approvals | /tools recent | /tools artifacts | /tools perf"), "/tools recent includes drill-down views");
 
   const toolArtifacts = toolsParser.tryHandle("/tools artifacts");
@@ -2017,6 +2191,60 @@ async function verifyCommandExecution(): Promise<void> {
   assert(idleMicroCompact.output.includes("Running micro compaction for 6 messages..."), "/compact micro idle path reports immediate micro compaction truthfully");
   assertEqual((idleMicroCompact.action as { strategy?: string } | undefined)?.strategy, "micro", "/compact micro keeps micro action strategy");
 
+  const idleSessionMemoryCompact = new SlashCommandParser({
+    session: {
+      sessionId: "ses_memory_1",
+      agentId: "agent-1",
+      caste: "assist_ant",
+      history: [
+        { type: "system", content: "sys", timestamp: "2026-04-16T08:55:00.000Z" },
+        { type: "user", content: "Remember: use bun only.", timestamp: "2026-04-16T08:56:00.000Z" },
+        { type: "assistant", content: "Decision recorded.", timestamp: "2026-04-16T08:57:00.000Z" },
+        { type: "user", content: "Keep latest safe.", timestamp: "2026-04-16T08:58:00.000Z" },
+        { type: "assistant", content: "Latest answer", timestamp: "2026-04-16T08:59:00.000Z" },
+        { type: "user", content: "Fresh", timestamp: "2026-04-16T09:00:00.000Z" },
+      ],
+    },
+  }).tryHandle("/compact session_memory");
+  assert(idleSessionMemoryCompact.output.includes("Running session_memory compaction for 6 messages..."), "/compact session_memory idle path reports immediate memory-aware compaction truthfully");
+  assertEqual((idleSessionMemoryCompact.action as { strategy?: string } | undefined)?.strategy, "session_memory", "/compact session_memory keeps action strategy");
+
+  const idleCachedMicroCompact = new SlashCommandParser({
+    session: {
+      sessionId: "ses_cached_micro_1",
+      agentId: "agent-1",
+      caste: "assist_ant",
+      history: [
+        { type: "system", content: "sys", timestamp: "2026-04-16T08:55:00.000Z" },
+        { type: "user", content: "clear stale cache", timestamp: "2026-04-16T08:56:00.000Z" },
+        { type: "tool_result", name: "grep_search", toolCallId: "tool_1", content: "match\n".repeat(1200), isError: false, durationMs: 9, timestamp: "2026-04-16T08:57:00.000Z" },
+        { type: "assistant", content: "older", timestamp: "2026-04-16T08:58:00.000Z" },
+        { type: "tool_result", name: "file_read", toolCallId: "tool_2", content: "row\n".repeat(1200), isError: false, durationMs: 9, timestamp: "2026-04-16T08:59:00.000Z" },
+        { type: "user", content: "latest", timestamp: "2026-04-16T09:00:00.000Z" },
+      ],
+    },
+  }).tryHandle("/compact cached_micro");
+  assert(idleCachedMicroCompact.output.includes("Running cached_micro compaction for 6 messages..."), "/compact cached_micro idle path reports immediate cache-aware compaction truthfully");
+  assertEqual((idleCachedMicroCompact.action as { strategy?: string } | undefined)?.strategy, "cached_micro", "/compact cached_micro keeps action strategy");
+
+  const idleCollapseCompact = new SlashCommandParser({
+    session: {
+      sessionId: "ses_collapse_1",
+      agentId: "agent-1",
+      caste: "assist_ant",
+      history: [
+        { type: "system", content: "sys", timestamp: "2026-04-16T08:55:00.000Z" },
+        { type: "user", content: "msg1", timestamp: "2026-04-16T08:56:00.000Z" },
+        { type: "assistant", content: "msg2", timestamp: "2026-04-16T08:57:00.000Z" },
+        { type: "user", content: "msg3", timestamp: "2026-04-16T08:58:00.000Z" },
+        { type: "assistant", content: "msg4", timestamp: "2026-04-16T08:59:00.000Z" },
+        { type: "user", content: "msg5", timestamp: "2026-04-16T09:00:00.000Z" },
+      ],
+    },
+  }).tryHandle("/compact context_collapse");
+  assert(idleCollapseCompact.output.includes("Running context_collapse compaction for 6 messages..."), "/compact context_collapse idle path reports immediate collapse truthfully");
+  assertEqual((idleCollapseCompact.action as { strategy?: string } | undefined)?.strategy, "context_collapse", "/compact context_collapse keeps action strategy");
+
   const smartMicroCompact = new SlashCommandParser({
     session: {
       sessionId: "ses_micro_smart",
@@ -2121,7 +2349,7 @@ async function verifyCommandExecution(): Promise<void> {
 
   const invalidCompact = parser.tryHandle("/compact bogus");
   assert(invalidCompact.isError, "/compact invalid strategy errors");
-  assert(invalidCompact.output.includes("Usage: /compact [standard|micro|reactive|smart|status|recent|handoff]"), "/compact invalid strategy shows smart-aware usage");
+  assert(invalidCompact.output.includes("Usage: /compact [standard|micro|reactive|session_memory|cached_micro|context_collapse|smart|status|recent|handoff]"), "/compact invalid strategy shows full strategy family usage");
 
   const microRecommendCompact = new SlashCommandParser({
     session: {
@@ -2240,6 +2468,16 @@ async function verifyCommandExecution(): Promise<void> {
   assert(model.output.includes("Selected provider: local"), "/model includes selected provider");
   assert(model.output.includes("Selected model: llama3.2"), "/model includes selected model");
   assert(model.output.includes("Set current provider model: /model <model>"), "/model includes current-provider set hint");
+
+  const memory = parser.tryHandle("/memory");
+  assert(memory.output.includes("Memory Recall:"), "/memory prints memory mode header");
+  assert(memory.output.includes("Current mode: prefer-exact"), "/memory reports current override");
+  assert(memory.output.includes("/memory auto | /memory exact | /memory derived"), "/memory teaches inspect views");
+
+  const memoryDerived = parser.tryHandle("/memory derived");
+  assertEqual((memoryDerived.action as { kind?: string } | undefined)?.kind, "set_memory_truth_mode", "/memory derived emits set-memory-truth action");
+  assertEqual((memoryDerived.action as { mode?: string | null } | undefined)?.mode, "derived_only", "/memory derived keeps derived_only mode");
+  assert(memoryDerived.output.includes("Next run: derived-only"), "/memory derived reports next-run mode");
 
   const modelSelected = parser.tryHandle("/model anthropic claude-opus-4-6");
   assertEqual((modelSelected.action as { kind?: string } | undefined)?.kind, "set_provider", "/model provider+model emits set-provider action");
@@ -2951,6 +3189,7 @@ async function verifyCommandExecution(): Promise<void> {
   actions.length = 0;
   await executeCommand(parser.tryHandle("/swarm repair index"), {
     submitChat: async () => { throw new Error("Loop bridge unavailable."); },
+    startSwarm: async (objective: string) => { actions.push(`swarm:${objective}`); return "Started swarm runtime"; },
     exitApp: () => { actions.push("exit"); },
     resetSession: () => { actions.push("reset"); },
     requestCompaction: async (strategy = "standard") => { actions.push(`compact:${strategy}`); },
@@ -2959,8 +3198,26 @@ async function verifyCommandExecution(): Promise<void> {
     showErrorMessage: (message: string) => { actions.push(`error:${message}`); },
     isRunActive: () => false,
   });
-  assert(actions.some((entry) => entry.includes("/swarm currently routes to the active agent only.")), "Executor keeps swarm alias warning when submit fails");
-  assert(actions.some((entry) => entry.startsWith("error:Failed to submit request: Loop bridge unavailable.")), "Executor reports submit failure");
+  assert(actions.some((entry) => entry.includes("Swarm execution requested")), "Executor announces swarm orchestration");
+  assert(actions.includes("swarm:repair index"), "Executor starts swarm instead of submitting chat");
+  assert(!actions.some((entry) => entry.startsWith("error:Failed to submit request")), "Executor does not use submit path for swarm");
+
+  actions.length = 0;
+  await executeCommand(parser.tryHandle("/swarm repair index"), {
+    submitChat: async () => { actions.push("submit"); },
+    queueChat: async (message: string) => { actions.push(`queue:${message}`); },
+    startSwarm: async (objective: string) => { actions.push(`swarm:${objective}`); return "Started swarm runtime"; },
+    exitApp: () => { actions.push("exit"); },
+    resetSession: () => { actions.push("reset"); },
+    requestCompaction: async (strategy = "standard") => { actions.push(`compact:${strategy}`); },
+    setBudgetCap: (maxUsd: number) => { actions.push(`budget:${maxUsd}`); },
+    showSystemMessage: (message: string) => { actions.push(`system:${message}`); },
+    showErrorMessage: (message: string) => { actions.push(`error:${message}`); },
+    isRunActive: () => true,
+  });
+  assert(actions.some((entry) => entry.includes("Swarm execution requested")), "Executor announces swarm orchestration during active runs");
+  assert(actions.includes("swarm:repair index"), "Executor starts swarm during active runs");
+  assert(!actions.includes("queue:repair index"), "Executor does not queue swarm as chat");
 
   actions.length = 0;
   await executeCommand(parser.tryHandle("/budget 3"), {

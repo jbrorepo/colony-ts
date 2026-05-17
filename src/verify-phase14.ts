@@ -114,6 +114,7 @@ function verifyAssemblyCore(): void {
       provider: "local",
       model: "llama3.2",
       circuitState: "closed",
+      memoryTruthModeOverride: "prefer_exact",
       availableProviders: ["anthropic", "local"],
       failover: { local: ["anthropic"] },
       providerHealth: {
@@ -170,6 +171,7 @@ function verifyAssemblyCore(): void {
   assert(result.messages[0]?.content.includes("Verify command: bun run verify:all"), "System prompt includes workspace verify command");
   assert(result.messages[0]?.content.includes("Runtime state:"), "System prompt includes runtime context");
   assert(result.messages[0]?.content.includes("Circuit: closed"), "System prompt includes circuit state");
+  assert(result.messages[0]?.content.includes("Memory recall mode: prefer-exact"), "System prompt includes memory recall mode");
   assert(result.messages[0]?.content.includes("Provider health:"), "System prompt includes provider health section");
   assert(result.messages[0]?.content.includes("anthropic: open (failures: 2)"), "System prompt includes provider health detail");
   assert(result.messages[0]?.content.includes("Recent failovers:"), "System prompt includes recent failovers");
@@ -179,7 +181,8 @@ function verifyAssemblyCore(): void {
   assert(result.messages[0]?.content.includes("Exact-signature rule list:"), "System prompt includes session allow rule list header");
   assert(result.messages[0]?.content.includes("file_read:abc1234567890def"), "System prompt includes session allow rule detail");
   assert(result.messages[0]?.content.includes("Budget cap: $10.00"), "System prompt includes budget cap");
-  assert(result.messages[0]?.content.includes("Last compaction: standard (~240 tokens saved)"), "System prompt includes last compaction summary");
+  assert(result.messages[0]?.content.includes("Last compaction: standard"), "System prompt includes last compaction summary");
+  assert(result.messages[0]?.content.includes("saved ~240 tokens"), "System prompt includes last compaction saved-token detail");
   assert(result.messages[0]?.content.includes("Startup checks: 0 error(s), 1 warning(s)"), "System prompt includes startup count summary");
   assert(result.messages[0]?.content.includes("Startup diagnostics:"), "System prompt includes startup diagnostics when degraded");
   assert(result.messages.slice(1).some((message) => message.role === "system" && message.content.includes("Context Summary")), "Compaction system summary preserved in history");
@@ -270,6 +273,7 @@ function verifyLoopIntegration(): void {
         provider: "anthropic",
         model: "claude-sonnet-4-5-20250929",
         circuitState: "open",
+        memoryTruthModeOverride: "derived_only",
         availableProviders: ["anthropic", "local"],
         failover: { local: ["anthropic"] },
         providerHealth: {
@@ -308,13 +312,15 @@ function verifyLoopIntegration(): void {
   assert(messages[0]?.content.includes("Provider: anthropic"), "Loop prompt keeps runtime provider context");
   assert(messages[0]?.content.includes("Model: claude-sonnet-4-5-20250929"), "Loop prompt keeps runtime model context");
   assert(messages[0]?.content.includes("Circuit: open"), "Loop prompt keeps runtime circuit context");
+  assert(messages[0]?.content.includes("Memory recall mode: derived-only"), "Loop prompt keeps memory recall mode");
   assert(messages[0]?.content.includes("Provider health:"), "Loop prompt includes provider health section");
   assert(messages[0]?.content.includes("connect refused"), "Loop prompt includes recent failover detail");
   assert(messages[0]?.content.includes("Exact-signature session rules: 2"), "Loop prompt keeps session allow rule count");
   assert(messages[0]?.content.includes("Exact-signature rule list:"), "Loop prompt keeps session allow rule list header");
   assert(messages[0]?.content.includes("file_read:abc1234567890def"), "Loop prompt keeps exact-signature rule detail");
   assert(messages[0]?.content.includes("Budget cap: $5.00"), "Loop prompt keeps budget cap");
-  assert(messages[0]?.content.includes("Last compaction: reactive (~512 tokens saved)"), "Loop prompt keeps last compaction context");
+  assert(messages[0]?.content.includes("Last compaction: reactive"), "Loop prompt keeps last compaction context");
+  assert(messages[0]?.content.includes("saved ~512 tokens"), "Loop prompt keeps last compaction saved-token detail");
   assert(messages[0]?.content.includes("Session state:"), "Loop prompt includes session state");
   assertEqual(messages.filter((message) => message.role === "system").length, 2, "Loop preserves later compaction system summary");
   const assistant = messages.find((message) => message.role === "assistant");

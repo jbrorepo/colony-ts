@@ -6,7 +6,15 @@
  * SOUL-style prompt blocks for system prompt injection.
  */
 
-import { Caste } from "../caste/enums";
+import {
+  Caste,
+  MethodCaste,
+  casteDisplayName,
+  legacyCasteForMethodCaste,
+  listCasteCompatibilityRecords,
+  normalizeCasteKey,
+  resolveMethodCaste,
+} from "../caste/enums";
 import { COLONY_MANIFESTO, toSystemPromptBlock } from "../manifesto/manifesto";
 
 export class IdentityError extends Error {
@@ -149,7 +157,11 @@ export class IdentityRegistry {
 }
 
 export function normalizeCasteName(caste: string): string {
-  return caste.toLowerCase().replace(/ /g, "_");
+  try {
+    return resolveMethodCaste(caste);
+  } catch {
+    return normalizeCasteKey(caste);
+  }
 }
 
 export function renderPromptBlock(
@@ -198,7 +210,7 @@ export function renderPromptBlock(
 }
 
 export function buildCasteDefaults(): Record<string, AgentIdentity> {
-  return {
+  const legacyDefaults: Record<string, AgentIdentity> = {
     [Caste.ROOT_QUEEN]: createAgentIdentity({
       agentId: "default_root_queen",
       displayName: "Root Queen",
@@ -619,6 +631,125 @@ export function buildCasteDefaults(): Record<string, AgentIdentity> {
       ],
     }),
   };
+
+  return buildMethodCasteIdentityDefaults(legacyDefaults);
+}
+
+function buildMethodCasteIdentityDefaults(
+  legacyDefaults: Record<string, AgentIdentity>,
+): Record<string, AgentIdentity> {
+  const defaults: Record<string, AgentIdentity> = {};
+
+  for (const record of listCasteCompatibilityRecords()) {
+    const legacy = record.legacyCaste ? legacyDefaults[record.legacyCaste] : undefined;
+    if (legacy) {
+      defaults[record.methodCaste] = methodIdentityFromLegacy(legacy, record.methodCaste);
+    }
+  }
+
+  defaults[MethodCaste.COMMAND_ANT] = createAgentIdentity({
+    agentId: "default_command_ant",
+    displayName: casteDisplayName(MethodCaste.COMMAND_ANT),
+    caste: MethodCaste.COMMAND_ANT,
+    persona: createPersonaConfig({
+      roleDescription:
+        "You are Command-ant, the workflow commander of The Colony. You turn Eldest architecture direction and Assist-Ant briefs into bounded execution plans, assign work, sequence gates, and keep mutation behind approvals.",
+      communicationStyle: "ordered, decisive, planning-focused",
+      expertiseAreas: [
+        "execution planning",
+        "workflow sequencing",
+        "task assignment",
+        "handoff coordination",
+      ],
+      behavioralDirectives: [
+        "Plan who does what before work starts",
+        "Keep mutation behind Vigil-ant and Account-ant gates",
+        "Assign narrow briefs to Oper-ant workers",
+        "Do not execute production mutations directly",
+      ],
+    }),
+    capabilities: [
+      "Create bounded execution plans",
+      "Sequence workflow gates",
+      "Assign work to specialist castes",
+      "Coordinate swarm fanout boundaries",
+    ],
+    boundaries: [
+      "Do not execute shell commands by default",
+      "Do not bypass Vigil-ant risk gates",
+      "Do not approve cost or final decisions",
+    ],
+    escalationRules: [
+      "Risk ambiguity: escalate to Vigil-ant",
+      "Architecture ambiguity: escalate to Eldest",
+      "Resource conflict: escalate to Queen and Account-ant",
+    ],
+    metadata: {
+      methodCaste: MethodCaste.COMMAND_ANT,
+      compatibilityAliases: ["command_ant", "command ant", "command-ant"],
+    },
+  });
+
+  return defaults;
+}
+
+function methodIdentityFromLegacy(
+  legacy: AgentIdentity,
+  methodCaste: MethodCaste,
+): AgentIdentity {
+  const displayName = casteDisplayName(methodCaste);
+  const legacyCaste = legacyCasteForMethodCaste(methodCaste);
+  const replaceIdentityTerms = (value: string): string => replaceCasteTerms(value, displayName);
+  return createAgentIdentity({
+    ...legacy,
+    displayName,
+    caste: methodCaste,
+    persona: createPersonaConfig({
+      ...legacy.persona,
+      roleDescription: replaceIdentityTerms(legacy.persona.roleDescription),
+      communicationStyle: legacy.persona.communicationStyle,
+      expertiseAreas: legacy.persona.expertiseAreas.map(replaceIdentityTerms),
+      behavioralDirectives: legacy.persona.behavioralDirectives.map(replaceIdentityTerms),
+      greetingTemplate: replaceIdentityTerms(legacy.persona.greetingTemplate),
+      systemPromptPrefix: replaceIdentityTerms(legacy.persona.systemPromptPrefix),
+      systemPromptSuffix: replaceIdentityTerms(legacy.persona.systemPromptSuffix),
+    }),
+    capabilities: legacy.capabilities.map(replaceIdentityTerms),
+    boundaries: legacy.boundaries.map(replaceIdentityTerms),
+    escalationRules: legacy.escalationRules.map(replaceIdentityTerms),
+    metadata: {
+      ...legacy.metadata,
+      methodCaste,
+      legacyCaste,
+      compatibilityAgentId: legacy.agentId,
+    },
+  });
+}
+
+function replaceCasteTerms(value: string, displayName: string): string {
+  if (!value) return value;
+  return value
+    .replace(/\bRoot Queen\b/g, "Queen")
+    .replace(/\bEldest Architect\b/g, "Eldest")
+    .replace(/\bAssist Ant\b/g, "Assist-Ant")
+    .replace(/\bShield Generals\b/g, "Vigil-ant")
+    .replace(/\bShield General\b/g, "Vigil-ant")
+    .replace(/\bWatcher Swarm\b/g, "Consult-ant")
+    .replace(/\bWatcher\b/g, "Consult-ant")
+    .replace(/\bForge Carvers\b/g, "Develop-ant")
+    .replace(/\bForge Carver\b/g, "Develop-ant")
+    .replace(/\bCore Shapers\b/g, "Logist-ant")
+    .replace(/\bCore Shaper\b/g, "Logist-ant")
+    .replace(/\bLiaison Ants\b/g, "Inform-ant")
+    .replace(/\bLiaison Ant\b/g, "Inform-ant")
+    .replace(/\bLedger Ants\b/g, "Account-ant")
+    .replace(/\bLedger Ant\b/g, "Account-ant")
+    .replace(/\bLore Burrow\b/g, "Cogniz-ant")
+    .replace(/\bLore Keeper\b/g, "Cogniz-ant")
+    .replace(/\bNameless Swarm\b/g, "Oper-ant")
+    .replace(/\bNameless Agent\b/g, "Oper-ant")
+    .replace(/\bNameless Worker\b/g, "Oper-ant")
+    .replace(/You are [^,.]+/g, `You are ${displayName}`);
 }
 
 function pushListSection(lines: string[], title: string, values: string[]): void {

@@ -10,70 +10,37 @@ import { mkdir, readdir, rename, rm } from "fs/promises";
 import { join } from "path";
 
 import { Caste } from "../caste/enums";
+import type { HallType } from "../mempalace/types";
+import { normalizeMemoryTruthMode, type MemoryTruthMode } from "../memory/hybrid-memory";
 import { getDataPath, settings } from "../settings";
-import type { CompactionResult, CompactionStrategy, ContextWindowSnapshot } from "./compaction";
+import {
+  normalizeCompactionStrategy,
+  type CompactionResult,
+  type CompactionStrategy,
+  type ContextWindowSnapshot,
+} from "./compaction";
 import type { SerializedMessage } from "./message";
+import type {
+  RuntimeCompactionEventSnapshot,
+  RuntimeCompactionHandoffSnapshot,
+  RuntimeFailoverSnapshot,
+  RuntimeHookEventSnapshot,
+  RuntimeMemoryRecallSnapshot,
+  RuntimeProviderHealthSnapshot,
+  RuntimeSessionUsageSnapshot,
+} from "./runtime-snapshot";
 import type { AgentSession } from "./session";
 import { rehydrateSession } from "./session";
 
 export type SessionInterruptionState = "none" | "interrupted_prompt" | "interrupted_turn";
 
-export interface SessionUsageSnapshot {
-  tokensUsed: number;
-  costUsd: number;
-  callCount: number;
-  deniedCount: number;
-  maxUsd: number;
-  maxTokens: number;
-}
-
-export interface SessionProviderHealthSnapshot {
-  state?: string;
-  failureCount?: number;
-}
-
-export interface SessionFailoverSnapshot {
-  fromProvider: string;
-  fromModel: string;
-  toProvider: string;
-  toModel: string;
-  errorType: string;
-  errorMessage: string;
-  timestamp: number;
-}
-
-export interface SessionHookEventSnapshot {
-  kind: string;
-  detail?: string;
-  timestamp: number;
-  durationMs?: number;
-}
-
-export interface SessionCompactionEventSnapshot {
-  strategy: CompactionStrategy;
-  trigger: string;
-  timestamp: number;
-  durationMs?: number;
-  compacted: boolean;
-  originalCount: number;
-  finalCount: number;
-  tokensSavedEstimate: number;
-  summaryLineCount: number;
-  summarizedMessageCount: number;
-  failureMessage?: string;
-}
-
-export interface SessionCompactionHandoffSnapshot {
-  status: "ok" | "failed";
-  strategy: CompactionStrategy;
-  trigger: string;
-  timestamp: number;
-  loggedCount: number;
-  structuredCount: number;
-  artifactId?: string;
-  artifactChars?: number;
-  errorMessage?: string;
-}
+export type SessionUsageSnapshot = RuntimeSessionUsageSnapshot;
+export type SessionProviderHealthSnapshot = RuntimeProviderHealthSnapshot;
+export type SessionFailoverSnapshot = RuntimeFailoverSnapshot;
+export type SessionHookEventSnapshot = RuntimeHookEventSnapshot;
+export type SessionCompactionEventSnapshot = RuntimeCompactionEventSnapshot;
+export type SessionCompactionHandoffSnapshot = RuntimeCompactionHandoffSnapshot;
+export type SessionMemoryRecallSnapshot = RuntimeMemoryRecallSnapshot;
 
 export interface SessionRecoverySnapshot {
   version: 1;
@@ -83,6 +50,8 @@ export interface SessionRecoverySnapshot {
   usage: SessionUsageSnapshot;
   sessionAllowRules: string[];
   contextUsage: ContextWindowSnapshot | null;
+  memoryTruthModeOverride: MemoryTruthMode | null;
+  lastMemoryRecall: SessionMemoryRecallSnapshot | null;
   providerHealth: Record<string, SessionProviderHealthSnapshot>;
   recentFailovers: SessionFailoverSnapshot[];
   recentHookEvents: SessionHookEventSnapshot[];
@@ -145,6 +114,8 @@ export function createSessionRecoverySnapshot(input: {
   usage?: Partial<SessionUsageSnapshot>;
   sessionAllowRules?: string[];
   contextUsage?: ContextWindowSnapshot | null;
+  memoryTruthModeOverride?: MemoryTruthMode | null;
+  lastMemoryRecall?: SessionMemoryRecallSnapshot | null;
   providerHealth?: Record<string, SessionProviderHealthSnapshot>;
   recentFailovers?: SessionFailoverSnapshot[];
   recentHookEvents?: SessionHookEventSnapshot[];
@@ -162,6 +133,8 @@ export function createSessionRecoverySnapshot(input: {
     usage: normalizeUsageSnapshot(input.usage ?? {}),
     sessionAllowRules: normalizeStringArray(input.sessionAllowRules),
     contextUsage: normalizeContextSnapshot(input.contextUsage),
+    memoryTruthModeOverride: normalizeMemoryTruthMode(input.memoryTruthModeOverride),
+    lastMemoryRecall: normalizeMemoryRecallSnapshot(input.lastMemoryRecall),
     providerHealth: normalizeProviderHealth(input.providerHealth),
     recentFailovers: normalizeRecentFailovers(input.recentFailovers),
     recentHookEvents: normalizeRecentHookEvents(input.recentHookEvents),
@@ -252,6 +225,8 @@ export async function loadSessionRecovery(
         usage: normalizeUsageSnapshot(isRecord(raw.usage) ? raw.usage : {}),
         sessionAllowRules: normalizeStringArray(raw.sessionAllowRules),
         contextUsage: normalizeContextSnapshot(raw.contextUsage),
+        memoryTruthModeOverride: normalizeMemoryTruthMode(raw.memoryTruthModeOverride),
+        lastMemoryRecall: normalizeMemoryRecallSnapshot(raw.lastMemoryRecall),
         providerHealth: normalizeProviderHealth(raw.providerHealth),
         recentFailovers: normalizeRecentFailovers(raw.recentFailovers),
         recentHookEvents: normalizeRecentHookEvents(raw.recentHookEvents),
@@ -285,6 +260,8 @@ export async function loadSessionRecovery(
     usage: normalizeUsageSnapshot({}),
     sessionAllowRules: [],
     contextUsage: null,
+    memoryTruthModeOverride: null,
+    lastMemoryRecall: null,
     providerHealth: {},
     recentFailovers: [],
     recentHookEvents: [],
@@ -571,8 +548,156 @@ function normalizeContextSnapshot(value: unknown): ContextWindowSnapshot | null 
   };
 }
 
+function normalizeMemoryRecallSnapshot(value: unknown): SessionMemoryRecallSnapshot | null {
+  if (!isRecord(value)) return null;
+  const sectionStateEntries = isRecord(value.sectionState)
+    ? Object.entries(value.sectionState)
+        .filter(([, state]) => state === "empty" || state === "full" || state === "truncated")
+        .map(([section, state]) => [section, state] as const)
+    : [];
+  const countSnapshot = (input: unknown) => {
+    const record = isRecord(input) ? input : {};
+    const state = record.state === "empty" || record.state === "full" || record.state === "truncated"
+      ? record.state
+      : "empty";
+    return {
+      total: finiteNumber(record.total),
+      shown: finiteNumber(record.shown),
+      hidden: finiteNumber(record.hidden),
+      state,
+    } satisfies SessionMemoryRecallSnapshot["exact"];
+  };
+  const palaceRecord = isRecord(value.palace) ? value.palace : {};
+  const sessionContribution = isRecord(value.sessionContribution) ? value.sessionContribution : {};
+  const totalContribution = isRecord(sessionContribution.total) ? sessionContribution.total : {};
+  const shownContribution = isRecord(sessionContribution.shown) ? sessionContribution.shown : {};
+  return {
+    truthMode: normalizeMemoryTruthMode(value.truthMode) ?? "balanced",
+    truthModeSource: value.truthModeSource === "explicit" ? "explicit" : "inferred",
+    truthProvenance: normalizeStringSequence(value.truthProvenance),
+    sectionOrder: normalizeStringSequence(value.sectionOrder),
+    shownSections: normalizeStringSequence(value.shownSections),
+    emptySections: normalizeStringSequence(value.emptySections),
+    hiddenSections: normalizeStringSequence(value.hiddenSections),
+    sectionState: Object.fromEntries(sectionStateEntries) as SessionMemoryRecallSnapshot["sectionState"],
+    noHitReason: typeof value.noHitReason === "string" && value.noHitReason.trim().length > 0
+      ? value.noHitReason.trim()
+      : undefined,
+    exact: countSnapshot(value.exact),
+    compact: countSnapshot(value.compact),
+    structured: countSnapshot(value.structured),
+    palace: {
+      direct: countSnapshot(palaceRecord.direct),
+      nearby: countSnapshot(palaceRecord.nearby),
+      broader: countSnapshot(palaceRecord.broader),
+      related: countSnapshot(palaceRecord.related),
+      total: countSnapshot(palaceRecord.total),
+      hintedPath: typeof palaceRecord.hintedPath === "string" && palaceRecord.hintedPath.trim().length > 0
+        ? palaceRecord.hintedPath.trim()
+        : undefined,
+      resolvedPath: typeof palaceRecord.resolvedPath === "string" && palaceRecord.resolvedPath.trim().length > 0
+        ? palaceRecord.resolvedPath.trim()
+        : undefined,
+      path: normalizeMemoryRecallPalacePath(palaceRecord.path),
+      traversal: normalizeMemoryRecallPalaceTraversal(palaceRecord.traversal),
+    },
+    sessionContribution: {
+      total: {
+        current: finiteNumber(totalContribution.current),
+        archived: finiteNumber(totalContribution.archived),
+        palace: finiteNumber(totalContribution.palace),
+      },
+      shown: {
+        current: finiteNumber(shownContribution.current),
+        archived: finiteNumber(shownContribution.archived),
+        palace: finiteNumber(shownContribution.palace),
+      },
+    },
+  };
+}
+
+function normalizeMemoryRecallPalacePath(
+  value: unknown,
+): SessionMemoryRecallSnapshot["palace"]["path"] {
+  const record = isRecord(value) ? value : {};
+  return {
+    inferredHall: normalizeHallType(record.inferredHall),
+    inferredWing: typeof record.inferredWing === "string" ? record.inferredWing : undefined,
+    inferredRoom: typeof record.inferredRoom === "string" ? record.inferredRoom : undefined,
+    inferredSourceFile: typeof record.inferredSourceFile === "string" ? record.inferredSourceFile : undefined,
+    resolvedHall: normalizeHallType(record.resolvedHall),
+    resolvedWing: typeof record.resolvedWing === "string" ? record.resolvedWing : undefined,
+    resolvedRoom: typeof record.resolvedRoom === "string" ? record.resolvedRoom : undefined,
+    resolvedSourceFile: typeof record.resolvedSourceFile === "string" ? record.resolvedSourceFile : undefined,
+    roomInference:
+      record.roomInference === "query" || record.roomInference === "source_hint" || record.roomInference === "resolved_hit"
+        ? record.roomInference
+        : undefined,
+    sourceHintScope: record.sourceHintScope === "wing" || record.sourceHintScope === "global"
+      ? record.sourceHintScope
+      : undefined,
+    hallFallback: normalizeHallFallback(record.hallFallback),
+    roomFallback: typeof record.roomFallback === "string" ? record.roomFallback : undefined,
+    sourceFallback: typeof record.sourceFallback === "string" ? record.sourceFallback : undefined,
+  };
+}
+
+function normalizeMemoryRecallPalaceTraversal(
+  value: unknown,
+): SessionMemoryRecallSnapshot["palace"]["traversal"] {
+  const record = isRecord(value) ? value : {};
+  return {
+    directHitStage: typeof record.directHitStage === "string" ? record.directHitStage : undefined,
+    directMissStage: typeof record.directMissStage === "string" ? record.directMissStage : undefined,
+    nearbySeed: typeof record.nearbySeed === "string" ? record.nearbySeed : undefined,
+    nearbyFallback: typeof record.nearbyFallback === "string" ? record.nearbyFallback : undefined,
+    nearbyHitStage: typeof record.nearbyHitStage === "string" ? record.nearbyHitStage : undefined,
+    nearbyUnavailable: record.nearbyUnavailable === "no-room" ? record.nearbyUnavailable : undefined,
+    nearbySeedVia:
+      record.nearbySeedVia === "query" || record.nearbySeedVia === "source_hint" || record.nearbySeedVia === "hit"
+        ? record.nearbySeedVia
+        : undefined,
+    broaderSeed: typeof record.broaderSeed === "string" ? record.broaderSeed : undefined,
+    broaderFallback: typeof record.broaderFallback === "string" ? record.broaderFallback : undefined,
+    broaderHitStage: typeof record.broaderHitStage === "string" ? record.broaderHitStage : undefined,
+    broaderUnavailable: record.broaderUnavailable === "no-room" ? record.broaderUnavailable : undefined,
+    broaderSeedVia: record.broaderSeedVia === "direct" || record.broaderSeedVia === "nearby"
+      ? record.broaderSeedVia
+      : undefined,
+    relatedSeed: typeof record.relatedSeed === "string" ? record.relatedSeed : undefined,
+    relatedFallback: typeof record.relatedFallback === "string" ? record.relatedFallback : undefined,
+    relatedHitStage: typeof record.relatedHitStage === "string" ? record.relatedHitStage : undefined,
+    relatedMissStage: typeof record.relatedMissStage === "string" ? record.relatedMissStage : undefined,
+    relatedUnavailable: record.relatedUnavailable === "no-wing" ? record.relatedUnavailable : undefined,
+  };
+}
+
+function normalizeHallType(value: unknown): HallType | undefined {
+  return value === "hall_facts"
+    || value === "hall_events"
+    || value === "hall_discoveries"
+    || value === "hall_preferences"
+    || value === "hall_advice"
+    ? value
+    : undefined;
+}
+
+function normalizeHallFallback(
+  value: unknown,
+): SessionMemoryRecallSnapshot["palace"]["path"]["hallFallback"] {
+  if (value === "unknown") return value;
+  if (typeof value !== "string") return undefined;
+  const [from, to] = value.split("->");
+  const normalizedFrom = normalizeHallType(from);
+  const normalizedTo = normalizeHallType(to);
+  return normalizedFrom && normalizedTo ? `${normalizedFrom}->${normalizedTo}` : undefined;
+}
+
 function normalizeCompactionResult(value: unknown): CompactionResult | null {
   if (!isRecord(value)) return null;
+  const strategyUsed = normalizeCompactionStrategy(
+    typeof value.strategyUsed === "string" ? value.strategyUsed : null,
+  ) ?? "standard";
   return {
     compacted: Boolean(value.compacted),
     originalCount: finiteNumber(value.originalCount),
@@ -582,11 +707,7 @@ function normalizeCompactionResult(value: unknown): CompactionResult | null {
     messages: Array.isArray(value.messages)
       ? value.messages.filter(isSerializedMessage)
       : [],
-    strategyUsed:
-      value.strategyUsed === "reactive"
-      || value.strategyUsed === "micro"
-        ? value.strategyUsed
-        : "standard",
+    strategyUsed,
     triggerSource:
       value.triggerSource === "auto_threshold"
       || value.triggerSource === "manual"
@@ -604,11 +725,9 @@ function normalizeCompactionResult(value: unknown): CompactionResult | null {
 
 function normalizeCompactionFailure(value: unknown): { strategy: CompactionStrategy; message: string } | null {
   if (!isRecord(value)) return null;
-  const strategy = value.strategy === "standard"
-    || value.strategy === "micro"
-    || value.strategy === "reactive"
-      ? value.strategy
-    : "standard";
+  const strategy = normalizeCompactionStrategy(
+    typeof value.strategy === "string" ? value.strategy : null,
+  ) ?? "standard";
   const message = typeof value.message === "string" ? value.message.trim() : "";
   if (!message) return null;
   return { strategy, message };
@@ -686,10 +805,9 @@ function normalizeRecentCompactionEvents(value: unknown): SessionCompactionEvent
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     if (!isRecord(entry)) return [];
-    const strategy: CompactionStrategy | null =
-      entry.strategy === "micro" || entry.strategy === "reactive" || entry.strategy === "standard"
-        ? entry.strategy
-        : null;
+    const strategy = normalizeCompactionStrategy(
+      typeof entry.strategy === "string" ? entry.strategy : null,
+    );
     const trigger = typeof entry.trigger === "string" ? entry.trigger.trim() : "";
     const timestamp = typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)
       ? entry.timestamp
@@ -718,10 +836,9 @@ function normalizeRecentCompactionEvents(value: unknown): SessionCompactionEvent
 function normalizeCompactionHandoff(value: unknown): SessionCompactionHandoffSnapshot | null {
   if (!isRecord(value)) return null;
   const status = value.status === "ok" || value.status === "failed" ? value.status : null;
-  const strategy: CompactionStrategy | null =
-    value.strategy === "micro" || value.strategy === "reactive" || value.strategy === "standard"
-      ? value.strategy
-      : null;
+  const strategy = normalizeCompactionStrategy(
+    typeof value.strategy === "string" ? value.strategy : null,
+  );
   const trigger = typeof value.trigger === "string" ? value.trigger.trim() : "";
   const timestamp = finiteNumber(value.timestamp);
   if (!status || !strategy || !trigger || !timestamp) return null;
@@ -748,6 +865,11 @@ function normalizeStringArray(value: unknown): string[] {
   return value
     .filter((item): item is string => typeof item === "string" && item.length > 0)
     .sort();
+}
+
+function normalizeStringSequence(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
 }
 
 function finiteNumber(value: unknown, fallback = 0): number {

@@ -6,6 +6,7 @@ import {
   parsePersistedToolResultMessage,
   type PersistedToolResult,
 } from "./runtime/tool-result-storage";
+import type { ToolDefinition } from "./runtime/tools-registry";
 
 export type ToolsViewMode = "summary" | "approvals" | "recent" | "artifacts" | "perf";
 export type PermissionsViewMode = "summary" | "active" | "allowed" | "denied" | "rules";
@@ -23,6 +24,7 @@ export interface GatewayPendingApprovalView {
   toolName: string;
   riskLevel?: string;
   category?: string;
+  signature?: string;
   summary?: string;
   reason?: string;
   warningCount?: number;
@@ -33,6 +35,11 @@ export interface GatewayToolsCommandPayload {
   isError?: boolean;
   data?: Record<string, unknown>;
 }
+
+export type GatewayToolDefinitionView = Pick<
+  ToolDefinition,
+  "toolId" | "category" | "requiresApproval" | "metadata"
+>;
 
 function readString(obj: unknown, keys: string[], fallback = ""): string {
   if (!obj || typeof obj !== "object") return fallback;
@@ -207,10 +214,18 @@ export function renderToolsView(opts: {
   activeTools: string[];
   permittedTools: string[];
   deniedTools: string[];
+  sessionRuleCount: number;
   pendingApproval: GatewayPendingApprovalView | null;
   recentActivity: GatewayToolActivity[];
+  toolDefinitions?: GatewayToolDefinitionView[];
 }): string {
   const artifacts = opts.recentActivity.filter((activity) => Boolean(activity.artifactPath));
+  const activeSet = new Set(opts.activeTools);
+  const metadataRows = [...(opts.toolDefinitions ?? [])]
+    .filter((definition) => activeSet.size === 0 || activeSet.has(definition.toolId))
+    .sort((left, right) => left.toolId.localeCompare(right.toolId))
+    .slice(0, 12)
+    .map(formatToolMetadataRow);
   const lines = ["Tool Activity:", ""];
 
   if (opts.view === "summary") {
@@ -220,6 +235,15 @@ export function renderToolsView(opts: {
     }
     lines.push(`Permitted this session: ${opts.permittedTools.length}`);
     lines.push(`Denied by policy: ${opts.deniedTools.length}`);
+    if (metadataRows.length > 0) {
+      lines.push("");
+      lines.push("Tool metadata:");
+      lines.push(...metadataRows);
+      const hiddenCount = Math.max(0, (opts.toolDefinitions ?? []).length - metadataRows.length);
+      if (hiddenCount > 0) {
+        lines.push(`... ${hiddenCount} more tool definitions hidden`);
+      }
+    }
     lines.push("Inspect policy: /permissions");
     lines.push(`Views: ${toolsInspectViews()}`);
     lines.push("");
@@ -230,6 +254,7 @@ export function renderToolsView(opts: {
     if (opts.pendingApproval?.toolName) {
       lines.push(`Pending approval: ${opts.pendingApproval.toolName}`);
       lines.push(`Risk: ${opts.pendingApproval.riskLevel ?? "unknown"} | Category: ${opts.pendingApproval.category ?? "unknown"}`);
+      if (opts.pendingApproval.signature) lines.push(`Signature: ${opts.pendingApproval.signature}`);
       if (opts.pendingApproval.summary) lines.push(`Summary: ${opts.pendingApproval.summary}`);
       if (opts.pendingApproval.reason) lines.push(`Reason: ${opts.pendingApproval.reason}`);
       if (typeof opts.pendingApproval.warningCount === "number" && opts.pendingApproval.warningCount > 0) {
@@ -239,6 +264,7 @@ export function renderToolsView(opts: {
     } else {
       lines.push("Pending approval: none");
     }
+    lines.push(`Exact-call session rules: ${opts.sessionRuleCount} (/permissions rules)`);
     if (opts.view === "approvals") {
       lines.push("");
       lines.push("Inspect policy: /permissions");
@@ -260,6 +286,9 @@ export function renderToolsView(opts: {
           lines.push(`   Reopen: /artifact "${activity.artifactPath}"`);
         }
       });
+      if (artifacts.length > 0) {
+        lines.push("Inspect latest: /artifact latest");
+      }
     }
     if (opts.view === "recent") {
       lines.push("");
@@ -365,8 +394,10 @@ export function buildToolsCommandPayload(opts: {
   activeTools: string[];
   permittedTools: string[];
   deniedTools: string[];
+  sessionRuleCount: number;
   pendingApproval: GatewayPendingApprovalView | null;
   recentActivity: GatewayToolActivity[];
+  toolDefinitions?: GatewayToolDefinitionView[];
 }): GatewayToolsCommandPayload {
   const artifacts = opts.recentActivity.filter((activity) => Boolean(activity.artifactPath));
   const view = resolveToolsView(opts.args);
@@ -383,19 +414,38 @@ export function buildToolsCommandPayload(opts: {
       activeTools: opts.activeTools,
       permittedTools: opts.permittedTools,
       deniedTools: opts.deniedTools,
+      sessionRuleCount: opts.sessionRuleCount,
       pendingApproval: opts.pendingApproval,
       recentActivity: opts.recentActivity,
+      toolDefinitions: opts.toolDefinitions,
     }),
     data: {
       activeCount: opts.activeTools.length,
       permittedCount: opts.permittedTools.length,
       deniedCount: opts.deniedTools.length,
+      sessionRuleCount: opts.sessionRuleCount,
       pendingApproval: Boolean(opts.pendingApproval?.toolName),
       recentCount: opts.recentActivity.length,
       artifactCount: artifacts.length,
+      metadataCount: opts.toolDefinitions?.length ?? 0,
       view,
     },
   };
+}
+
+function formatToolMetadataRow(definition: GatewayToolDefinitionView): string {
+  const metadata = definition.metadata;
+  const capabilities: string[] = [];
+  capabilities.push(metadata.readOnly ? "read-only" : "mutating");
+  if (metadata.destructive) capabilities.push("destructive");
+  if (metadata.search.indexed) capabilities.push("search");
+  capabilities.push(`safe=${metadata.concurrency}`);
+  capabilities.push(`interrupt=${metadata.interrupt}`);
+  capabilities.push(`progress=${metadata.progress}`);
+  capabilities.push(`transcript=${metadata.transcript.output}`);
+  capabilities.push(`persist=${metadata.persistedResult.mode}@${metadata.persistedResult.thresholdBytes}B`);
+  capabilities.push(`approval=${definition.requiresApproval ? "required" : "policy"}`);
+  return `${definition.toolId} | ${capabilities.join(" | ")}`;
 }
 
 export function buildPermissionsCommandPayload(opts: {

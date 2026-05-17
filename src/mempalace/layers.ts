@@ -146,7 +146,7 @@ export class Layer2 {
     this._palacePath = palacePath ?? cfg.palacePath;
   }
 
-  async retrieve(opts?: { wing?: string; room?: string; nResults?: number }): Promise<string> {
+  async retrieve(opts?: { wing?: string; room?: string; hall?: string; nResults?: number }): Promise<string> {
     let store: PalaceStore;
     try {
       store = await PalaceStore.open({ palacePath: this._palacePath, create: false });
@@ -158,11 +158,12 @@ export class Layer2 {
       const drawers = store.list({
         wing: opts?.wing,
         room: opts?.room,
+        hall: opts?.hall,
         limit: opts?.nResults ?? 10,
       });
 
       if (drawers.length === 0) {
-        const label = [opts?.wing && `wing=${opts.wing}`, opts?.room && `room=${opts.room}`]
+        const label = [opts?.wing && `wing=${opts.wing}`, opts?.room && `room=${opts.room}`, opts?.hall && `hall=${opts.hall}`]
           .filter(Boolean)
           .join(" ");
         return `No drawers found for ${label}.`;
@@ -174,7 +175,7 @@ export class Layer2 {
         let snippet = drawer.content.trim().replace(/\n/g, " ");
         if (snippet.length > 300) snippet = `${snippet.slice(0, 297)}...`;
 
-        let entry = `  [${drawer.room}] ${snippet}`;
+        let entry = `  [${drawer.room}${drawer.hall ? `/${drawer.hall}` : ""}] ${snippet}`;
         if (source) entry += `  (${source})`;
         lines.push(entry);
       }
@@ -198,7 +199,7 @@ export class Layer3 {
     this._palacePath = palacePath ?? cfg.palacePath;
   }
 
-  async search(query: string, opts?: { wing?: string; room?: string; nResults?: number }): Promise<string> {
+  async search(query: string, opts?: { wing?: string; room?: string; hall?: string; sourceFile?: string; nResults?: number }): Promise<string> {
     let store: PalaceStore;
     try {
       store = await PalaceStore.open({ palacePath: this._palacePath, create: false });
@@ -210,6 +211,8 @@ export class Layer3 {
       const result = store.search(query, {
         wing: opts?.wing,
         room: opts?.room,
+        hall: opts?.hall,
+        sourceFile: opts?.sourceFile,
         nResults: opts?.nResults ?? 5,
       });
 
@@ -221,7 +224,7 @@ export class Layer3 {
         let snippet = hit.text.trim().replace(/\n/g, " ");
         if (snippet.length > 300) snippet = `${snippet.slice(0, 297)}...`;
 
-        lines.push(`  [${index + 1}] ${hit.wing}/${hit.room} (sim=${hit.similarity})`);
+        lines.push(`  [${index + 1}] ${hit.wing}/${hit.room}${hit.hall ? `/${hit.hall}` : ""} (sim=${hit.similarity})`);
         lines.push(`      ${snippet}`);
         if (hit.sourceFile) lines.push(`      src: ${hit.sourceFile}`);
       }
@@ -232,7 +235,7 @@ export class Layer3 {
     }
   }
 
-  async searchRaw(query: string, opts?: { wing?: string; room?: string; nResults?: number }): Promise<SearchHit[]> {
+  async searchRaw(query: string, opts?: { wing?: string; room?: string; hall?: string; sourceFile?: string; nResults?: number }): Promise<SearchHit[]> {
     let store: PalaceStore;
     try {
       store = await PalaceStore.open({ palacePath: this._palacePath, create: false });
@@ -244,6 +247,8 @@ export class Layer3 {
       return store.search(query, {
         wing: opts?.wing,
         room: opts?.room,
+        hall: opts?.hall,
+        sourceFile: opts?.sourceFile,
         nResults: opts?.nResults ?? 5,
       }).results;
     } finally {
@@ -290,21 +295,23 @@ export class MemoryStack {
   }
 
   /** On-demand L2 retrieval filtered by wing/room. */
-  async recall(opts?: { wing?: string; room?: string; nResults?: number }): Promise<string> {
+  async recall(opts?: { wing?: string; room?: string; hall?: string; nResults?: number }): Promise<string> {
     return this.l2.retrieve(opts);
   }
 
   /** Deep L3 semantic search. */
-  async search(query: string, opts?: { wing?: string; room?: string; nResults?: number }): Promise<string> {
+  async search(query: string, opts?: { wing?: string; room?: string; hall?: string; sourceFile?: string; nResults?: number }): Promise<string> {
     return this.l3.search(query, opts);
   }
 
   /** Status of all layers. */
   async status(): Promise<StackStatus> {
     let totalDrawers = 0;
+    const hierarchy = emptyHierarchy();
     try {
       const store = await PalaceStore.open({ palacePath: this._palacePath, create: false });
       totalDrawers = store.count();
+      Object.assign(hierarchy, store.getHierarchy());
       store.close();
     } catch {
       // No palace yet.
@@ -321,6 +328,17 @@ export class MemoryStack {
       l2OnDemand: { description: "Wing/room filtered retrieval" },
       l3DeepSearch: { description: "Full semantic search via SQLite FTS5" },
       totalDrawers,
+      hierarchy,
     };
   }
+}
+
+function emptyHierarchy(): StackStatus["hierarchy"] {
+  return {
+    wings: {},
+    rooms: {},
+    halls: {},
+    sources: {},
+    taxonomy: {},
+  };
 }

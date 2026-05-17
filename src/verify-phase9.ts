@@ -12,7 +12,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 
-import { Caste } from "./caste/enums";
+import { Caste, MethodCaste, listMethodCastes } from "./caste/enums";
 import { LLMProvider, type CompletionParams } from "./llm/base";
 import { LLMRateLimitError } from "./llm/exceptions";
 import { EffortLevel, EffortResolver, modelSupportsEffort, modelSupportsMaxEffort } from "./llm/effort-resolver";
@@ -28,6 +28,8 @@ import {
 } from "./llm/models";
 import { PromptBuilder } from "./runtime/prompt-builder";
 import { PromptAssembler } from "./runtime/prompt-assembler";
+import { createUserMessageQueue } from "./runtime/message-queue";
+import { buildRuntimeContextSnapshot } from "./runtime/runtime-snapshot";
 import { buildRuntimeTooling } from "./runtime/runtime-tooling";
 import {
   getCastePromptTemplate,
@@ -37,8 +39,12 @@ import { createAgentSession } from "./runtime/session";
 import { createSystemMessage, createUserMessage, serializeMessage } from "./runtime/message";
 import { detectWorkspace } from "./runtime/workspace";
 import {
+  formatStartupBlockMessage,
+  formatStartupPlaceholder,
   formatStartupReport,
   runStartupDiagnostics,
+  startupDoctorFocusCommand,
+  startupDoctorInspectCommands,
 } from "./runtime/startup-diagnostics";
 import { SlashCommandParser } from "./gateway";
 
@@ -145,7 +151,7 @@ async function verifySlashCommands(): Promise<void> {
 
   const swarm = parser.tryHandle('/swarm "hello world"');
   assertEqual(swarm.command, "swarm", "Quoted /swarm resolves");
-  assertEqual(swarm.data.message, "hello world", "Quoted arg preserved");
+  assertEqual(swarm.data.objective, "hello world", "Quoted swarm objective preserved");
 
   const status = parser.tryHandle("/status");
   assert(status.output.includes(session.sessionId), "Status includes session ID");
@@ -263,14 +269,15 @@ async function verifyGeminiProvider(): Promise<void> {
 async function verifyPromptTemplates(): Promise<void> {
   section("3. Prompt Templates");
 
-  assertEqual(listCastePromptTemplates().length, Object.values(Caste).length, "Every caste has a template");
-  assert(getCastePromptTemplate(Caste.FORGE_CARVERS).delegationPrompt.includes("Forge Carver"), "Forge template available");
+  assertEqual(listCastePromptTemplates().length, listMethodCastes().length, "Every method caste has a template");
+  assert(getCastePromptTemplate(Caste.FORGE_CARVERS).delegationPrompt.includes("Develop-ant"), "Develop-ant template available through Forge compatibility");
+  assert(getCastePromptTemplate(MethodCaste.COMMAND_ANT).delegationPrompt.includes("Command-ant"), "Command-ant template available");
 
   const prompt = PromptBuilder.buildSystemPrompt({
     caste: Caste.SHIELD_GENERALS,
     toolNames: ["file_read"],
   });
-  assert(prompt.includes("## Identity: Shield General"), "Prompt builder uses identity registry");
+  assert(prompt.includes("## Identity: Vigil-ant"), "Prompt builder uses method identity registry");
   assert(prompt.includes("skeptical"), "Prompt preserves supplementary caste personality");
   assert(prompt.includes("concrete exploit paths"), "Prompt includes caste guideline");
 }
@@ -318,6 +325,7 @@ async function verifyPromptRuntimeContext(): Promise<void> {
       model: "llama3.2",
       selectedProvider: "anthropic",
       selectedModel: "claude-sonnet-4-5",
+      memoryTruthModeOverride: "prefer_derived",
       recentToolActivity: [
         {
           toolName: "file_read",
@@ -360,6 +368,7 @@ async function verifyPromptRuntimeContext(): Promise<void> {
   assert(systemPrompt.includes("Verify command: bun run verify:all"), "Assembled prompt includes workspace verify command");
   assert(systemPrompt.includes("Runtime state:"), "Assembled prompt includes runtime section");
   assert(systemPrompt.includes("Next run LLM: anthropic:claude-sonnet-4-5"), "Assembled prompt includes selected next-run llm");
+  assert(systemPrompt.includes("Memory recall mode: prefer-derived"), "Assembled prompt includes memory recall mode");
   assert(systemPrompt.includes("Recent tools: 1"), "Assembled prompt includes recent tool count");
   assert(systemPrompt.includes("file_read | pending approval | low/read | Read file README.md"), "Assembled prompt includes recent tool summary");
   assert(systemPrompt.includes("Recent hooks: 1"), "Assembled prompt includes recent hook count");
@@ -396,8 +405,24 @@ async function verifyPromptRuntimeContext(): Promise<void> {
     "Loop prompt context forwards recent hook events",
   );
   assert(
+    hookSource.includes("memoryTruthModeOverride: store.memoryTruthModeOverride"),
+    "Loop prompt context forwards memory recall override",
+  );
+  assert(
     hookSource.includes("pendingCompactionStrategy: store.pendingCompactionStrategy"),
     "Loop prompt context forwards queued compaction state",
+  );
+  assert(
+    hookSource.includes("queuedPromptCount: store.queuedPromptCount"),
+    "Loop prompt context forwards queued prompt count",
+  );
+  assert(
+    hookSource.includes("queuedPromptPreview: store.queuedPromptPreview"),
+    "Loop prompt context forwards queued prompt preview",
+  );
+  assert(
+    hookSource.includes("interruptRequested: store.interruptRequested"),
+    "Loop prompt context forwards stopping-run state",
   );
   assert(
     hookSource.includes("pendingApprovalToolName: store.pendingApproval?.toolName"),
@@ -411,6 +436,107 @@ async function verifyPromptRuntimeContext(): Promise<void> {
     hookSource.includes("sessionRules: [...store.sessionAllowRules]"),
     "Loop prompt context forwards exact-signature rule list",
   );
+}
+
+async function verifySharedRuntimeSnapshotContract(): Promise<void> {
+  section("3c. Shared Runtime Snapshot Contract");
+
+  const snapshot = buildRuntimeContextSnapshot({
+    provider: "local",
+    model: "llama3.2",
+    selectedProvider: "anthropic",
+    selectedModel: "claude-sonnet-4-5",
+    queuedPromptCount: 1,
+    queuedPromptPreview: "queued follow-up prompt",
+    availableProviders: ["local", "anthropic"],
+    failover: { local: ["anthropic"] },
+    providerHealth: { local: { state: "open", failureCount: 3 } },
+    recentFailovers: [{
+      fromProvider: "local",
+      toProvider: "anthropic",
+      errorType: "LLMConnectionError",
+      errorMessage: "connect refused",
+      timestamp: 1,
+    }],
+    recentToolActivity: [{
+      toolName: "file_read",
+      status: "saved artifact",
+      detail: "12,244 chars",
+      artifactPath: "D:/The Colony Test/.colony/tool-results/ses_abc/artifact-1.txt",
+    }],
+    recentHookEvents: [{
+      kind: "PostToolUse",
+      detail: "file_read",
+      timestamp: 2,
+      durationMs: 14,
+    }],
+    activeToolIds: ["file_read"],
+    permittedToolIds: ["file_read"],
+    sessionRules: ["file_read:abc123"],
+  });
+
+  snapshot.availableProviders?.push("gemini");
+  snapshot.failover?.local?.push("openai");
+  if (snapshot.providerHealth?.local) snapshot.providerHealth.local.failureCount = 9;
+  if (snapshot.recentFailovers?.[0]) snapshot.recentFailovers[0].toProvider = "openai";
+  if (snapshot.recentToolActivity?.[0]) snapshot.recentToolActivity[0].status = "pending approval";
+  if (snapshot.recentHookEvents?.[0]) snapshot.recentHookEvents[0].detail = "shell_exec";
+  snapshot.activeToolIds?.push("shell_exec");
+  snapshot.permittedToolIds?.push("web_search");
+  snapshot.sessionRules?.push("web_search:def456");
+
+  const fresh = buildRuntimeContextSnapshot({
+    provider: "local",
+    model: "llama3.2",
+    selectedProvider: "anthropic",
+    selectedModel: "claude-sonnet-4-5",
+    queuedPromptCount: 1,
+    queuedPromptPreview: "queued follow-up prompt",
+    availableProviders: ["local", "anthropic"],
+    failover: { local: ["anthropic"] },
+    providerHealth: { local: { state: "open", failureCount: 3 } },
+    recentFailovers: [{
+      fromProvider: "local",
+      toProvider: "anthropic",
+      errorType: "LLMConnectionError",
+      errorMessage: "connect refused",
+      timestamp: 1,
+    }],
+    recentToolActivity: [{
+      toolName: "file_read",
+      status: "saved artifact",
+      detail: "12,244 chars",
+      artifactPath: "D:/The Colony Test/.colony/tool-results/ses_abc/artifact-1.txt",
+    }],
+    recentHookEvents: [{
+      kind: "PostToolUse",
+      detail: "file_read",
+      timestamp: 2,
+      durationMs: 14,
+    }],
+    activeToolIds: ["file_read"],
+    permittedToolIds: ["file_read"],
+    sessionRules: ["file_read:abc123"],
+  });
+
+  assertEqual(fresh.availableProviders?.join(","), "local,anthropic", "Runtime snapshot clones provider arrays");
+  assertEqual(fresh.failover?.local?.join(","), "anthropic", "Runtime snapshot clones failover chains");
+  assertEqual(fresh.providerHealth?.local?.failureCount, 3, "Runtime snapshot clones provider-health rows");
+  assertEqual(fresh.recentFailovers?.[0]?.toProvider, "anthropic", "Runtime snapshot clones failover rows");
+  assertEqual(fresh.recentToolActivity?.[0]?.status, "saved artifact", "Runtime snapshot clones tool activity");
+  assertEqual(fresh.recentHookEvents?.[0]?.detail, "file_read", "Runtime snapshot clones hook activity");
+  assertEqual(fresh.activeToolIds?.join(","), "file_read", "Runtime snapshot clones active tool ids");
+  assertEqual(fresh.permittedToolIds?.join(","), "file_read", "Runtime snapshot clones permitted tool ids");
+  assertEqual(fresh.sessionRules?.join(","), "file_read:abc123", "Runtime snapshot clones exact-signature rules");
+  assertEqual(fresh.queuedPromptCount ?? 0, 1, "Runtime snapshot keeps queued prompt count");
+  assertEqual(fresh.queuedPromptPreview ?? "", "queued follow-up prompt", "Runtime snapshot keeps queued prompt preview");
+
+  const queue = createUserMessageQueue();
+  assert(queue.enqueue("fix bug").accepted, "Queued prompt helper accepts first prompt");
+  const replace = queue.enqueue("write tests");
+  assertEqual(replace.replaced, true, "Queued prompt helper supersedes older prompt");
+  assertEqual(queue.peek()?.content ?? "", "write tests", "Queued prompt helper exposes latest prompt");
+  assertEqual(queue.enqueue("write tests").duplicate, true, "Queued prompt helper dedups identical prompt");
 }
 
 async function verifyWorkspaceDetection(): Promise<void> {
@@ -530,6 +656,289 @@ async function verifyWorkspaceToolingBoundary(): Promise<void> {
   }
 }
 
+async function verifyGatewaySnapshotBuilders(): Promise<void> {
+  section("5. Gateway Snapshot Builders");
+
+  const gatewaySource = await readFile(new URL("./gateway.ts", import.meta.url), "utf-8");
+  const doctorSnapshotSource = await readFile(new URL("./gateway-doctor-snapshot.ts", import.meta.url), "utf-8");
+  const providerSnapshotSource = await readFile(new URL("./gateway-provider-snapshot.ts", import.meta.url), "utf-8");
+  const statusSnapshotSource = await readFile(new URL("./gateway-status-snapshot.ts", import.meta.url), "utf-8");
+  const eventsSnapshotSource = await readFile(new URL("./gateway-events-snapshot.ts", import.meta.url), "utf-8");
+  const sessionSnapshotSource = await readFile(new URL("./gateway-session-snapshot.ts", import.meta.url), "utf-8");
+  const sessionGatewaySource = await readFile(new URL("./gateway-session.ts", import.meta.url), "utf-8");
+  const providerSource = await readFile(new URL("./gateway-provider.ts", import.meta.url), "utf-8");
+  const gatewayContractSource = await readFile(new URL("./gateway-contract.ts", import.meta.url), "utf-8");
+  const runtimeSnapshotSource = await readFile(new URL("./runtime/runtime-snapshot.ts", import.meta.url), "utf-8");
+  const promptAssemblerSource = await readFile(new URL("./runtime/prompt-assembler.ts", import.meta.url), "utf-8");
+  const sessionRecoverySource = await readFile(new URL("./runtime/session-recovery.ts", import.meta.url), "utf-8");
+  const loopBridgeSource = await readFile(new URL("./ui/use-colony-loop.ts", import.meta.url), "utf-8");
+  const storeSource = await readFile(new URL("./ui/store.ts", import.meta.url), "utf-8");
+  const componentsSource = await readFile(new URL("./ui/components.tsx", import.meta.url), "utf-8");
+
+  assert(
+    gatewaySource.includes('from "./gateway-doctor-snapshot"'),
+    "Gateway imports doctor snapshot builder",
+  );
+  assert(
+    gatewaySource.includes("const snapshot = buildGatewayDoctorSnapshot(args, ctx);"),
+    "Gateway builds doctor snapshot before payload render",
+  );
+  assert(
+    gatewaySource.includes("const snapshot = buildGatewayProviderSnapshot(ctx);"),
+    "Gateway builds provider snapshot before payload render",
+  );
+  assert(
+    gatewaySource.includes('from "./gateway-status-snapshot"'),
+    "Gateway imports status snapshot builder",
+  );
+  assert(
+    statusSnapshotSource.includes('from "./runtime/startup-diagnostics"'),
+    "Status snapshot module imports shared startup doctor helpers",
+  );
+  assert(
+    gatewaySource.includes("const snapshot = buildGatewayStatusSnapshot(ctx);"),
+    "Gateway builds status snapshot before payload render",
+  );
+  assert(
+    gatewaySource.includes('from "./gateway-events-snapshot"'),
+    "Gateway imports event snapshot builders",
+  );
+  assert(
+    gatewaySource.includes("const snapshot = buildGatewayEventsSnapshot(ctx);"),
+    "Gateway builds events snapshot before payload render",
+  );
+  assert(
+    gatewaySource.includes("const snapshot = buildGatewayPerfSnapshot(ctx);"),
+    "Gateway builds perf snapshot before payload render",
+  );
+  assert(
+    gatewaySource.includes('from "./gateway-session-snapshot"'),
+    "Gateway imports current-session snapshot builder",
+  );
+  assert(
+    gatewaySource.includes("const currentSession = buildGatewayCurrentSessionSnapshot(ctx.session, sessions);"),
+    "Gateway builds current-session snapshot before session payload routing",
+  );
+  assert(
+    doctorSnapshotSource.includes("export function buildGatewayDoctorSnapshot"),
+    "Doctor snapshot module owns doctor snapshot assembly",
+  );
+  assert(
+    doctorSnapshotSource.includes("const providerDiagnosticsLines = doctorProviderDiagnosticsLines"),
+    "Doctor snapshot module owns provider diagnostics assembly",
+  );
+  assert(
+    providerSnapshotSource.includes("export function buildGatewayProviderSnapshot"),
+    "Provider snapshot module owns provider command snapshot assembly",
+  );
+  assert(
+    statusSnapshotSource.includes("export function buildGatewayStatusSnapshot"),
+    "Status snapshot module owns status snapshot assembly",
+  );
+  assert(
+    statusSnapshotSource.includes("renderStatusRuntimeSection"),
+    "Status snapshot module owns runtime status section assembly",
+  );
+  assert(
+    statusSnapshotSource.includes("startupDoctorInspectCommands(ctx.startupReport"),
+    "Status snapshot module uses shared startup doctor inspect helper",
+  );
+  assert(
+    eventsSnapshotSource.includes("export function buildGatewayEventsSnapshot"),
+    "Events snapshot module owns events snapshot assembly",
+  );
+  assert(
+    eventsSnapshotSource.includes("export function buildGatewayPerfSnapshot"),
+    "Events snapshot module owns perf snapshot assembly",
+  );
+  assert(
+    sessionSnapshotSource.includes("export function buildGatewayCurrentSessionSnapshot"),
+    "Session snapshot module owns current-session alias assembly",
+  );
+  assert(
+    sessionSnapshotSource.includes("currentHistoryAliases: currentSessionShortcutAliases"),
+    "Session snapshot module owns current-session shortcut alias assembly",
+  );
+  assert(
+    sessionGatewaySource.includes('from "./runtime/session-shortcuts"'),
+    "Gateway session helpers import shared session-shortcut contract",
+  );
+  assert(
+    sessionGatewaySource.includes("buildGatewayLiveSessionShortcutSnapshot"),
+    "Gateway session helpers build a shared live-session shortcut snapshot",
+  );
+  assert(
+    sessionGatewaySource.includes("return buildLiveCurrentHistoryHint("),
+    "Gateway current-session history commands delegate to shared history-hint builder",
+  );
+  assert(
+    sessionGatewaySource.includes("currentOwnsLatestHistoryAlias"),
+    "Gateway latest-current detection delegates through shared session-shortcut truth",
+  );
+  assert(
+    providerSource.includes("const perf = providerPerfSummaries(opts.costTracker, runtime);"),
+    "Provider payload builder owns provider perf helper usage locally",
+  );
+  assert(
+    !providerSource.includes("opts.providerPerfSummaries"),
+    "Provider payload builder no longer depends on injected perf helper",
+  );
+  assert(
+    runtimeSnapshotSource.includes("export interface RuntimeContextSnapshot"),
+    "Runtime snapshot module owns the shared runtime context contract",
+  );
+  assert(
+    runtimeSnapshotSource.includes("memoryTruthModeOverride?: MemoryTruthMode | null;"),
+    "Runtime snapshot contract includes memory recall override",
+  );
+  assert(
+    runtimeSnapshotSource.includes("export function buildRuntimeContextSnapshot"),
+    "Runtime snapshot module exports the shared runtime snapshot builder",
+  );
+  assert(
+    promptAssemblerSource.includes('from "./runtime-snapshot"'),
+    "Prompt assembler imports the shared runtime snapshot contract",
+  );
+  assert(
+    promptAssemblerSource.includes("export type PromptRuntimeContext = RuntimeContextSnapshot;"),
+    "Prompt assembler aliases runtime context to the shared runtime snapshot contract",
+  );
+  assert(
+    sessionRecoverySource.includes('from "./runtime-snapshot"'),
+    "Session recovery imports the shared runtime snapshot contract",
+  );
+  assert(
+    sessionRecoverySource.includes("export type SessionUsageSnapshot = RuntimeSessionUsageSnapshot;"),
+    "Session recovery aliases usage snapshot to the shared runtime snapshot contract",
+  );
+  assert(
+    sessionRecoverySource.includes("memoryTruthModeOverride: MemoryTruthMode | null;"),
+    "Session recovery persists memory recall override",
+  );
+  assert(
+    gatewayContractSource.includes('from "./runtime/runtime-snapshot"'),
+    "Gateway contract imports the shared runtime snapshot contract",
+  );
+  assert(
+    gatewayContractSource.includes("runtime?: Partial<RuntimeContextSnapshot> | null;"),
+    "Gateway contract exposes runtime data through the shared runtime snapshot contract",
+  );
+  assert(
+    loopBridgeSource.includes("runtime: buildRuntimeContextSnapshot({"),
+    "Loop bridge builds prompt runtime data through the shared runtime snapshot builder",
+  );
+  assert(
+    loopBridgeSource.includes("memoryTruthModeOverride: store.memoryTruthModeOverride"),
+    "Loop bridge forwards memory recall override into runtime snapshot",
+  );
+  assert(
+    storeSource.includes('from "../runtime/runtime-snapshot"'),
+    "UI store imports the shared runtime snapshot contract",
+  );
+  assert(
+    storeSource.includes("export function samePersistedSessionSummaries("),
+    "UI store exports persisted-session equality helper for long-session stability",
+  );
+  assert(
+    storeSource.includes("if (samePersistedSessionSummaries(state.persistedSessions, sessions)) {"),
+    "UI store skips identical persisted-session catalog writes",
+  );
+  assert(
+    storeSource.includes('export type ProviderHealthSummary = RuntimeProviderHealthSnapshot;'),
+    "UI store aliases provider-health view data to the shared runtime snapshot contract",
+  );
+  assert(
+    storeSource.includes("export type RuntimeStatusSummary =")
+      && storeSource.includes('circuitState?: CircuitState;'),
+    "UI store derives runtime status view data from the shared runtime snapshot contract",
+  );
+  assert(
+    componentsSource.includes('from "../runtime/runtime-snapshot"'),
+    "UI components import the shared runtime snapshot contract",
+  );
+  assert(
+    storeSource.includes("export function sameProviderDiagnostics("),
+    "UI store exports provider-diagnostic equality helper for long-session stability",
+  );
+  assert(
+    storeSource.includes("export function sameContextWindowSnapshot("),
+    "UI store exports context-window equality helper for long-session stability",
+  );
+  assert(
+    storeSource.includes("export function sameStartupReport(")
+      && storeSource.includes("export function sameWorkspaceInfo(")
+      && storeSource.includes("export function sameCompactionResult(")
+      && storeSource.includes("export function sameCompactionFailure(")
+      && storeSource.includes("export function sameCompactionHandoff("),
+    "UI store exports report/workspace/compaction equality helpers for long-session stability",
+  );
+  assert(
+    storeSource.includes("if (")
+      && storeSource.includes("sameProviderDiagnostics(")
+      && storeSource.includes("state.providerHealth,")
+      && storeSource.includes("state.recentFailovers,"),
+    "UI store skips identical provider-diagnostic writes",
+  );
+  assert(
+    storeSource.includes("if (sameStringArray(state.sessionAllowRules, normalized)) {"),
+    "UI store skips identical exact-signature rule writes",
+  );
+  assert(
+    storeSource.includes("sameContextWindowSnapshot(state.contextUsage, snapshot)")
+      && storeSource.includes("state.tokensUsed === nextTokensUsed")
+      && storeSource.includes("state.maxTokens === nextMaxTokens"),
+    "UI store skips identical context-usage writes",
+  );
+  assert(
+    storeSource.includes("sameWorkspaceInfo(state.workspaceInfo, info)")
+      && storeSource.includes("sameStartupReport(state.startupReport, report)")
+      && storeSource.includes("sameCompactionResult(state.lastCompaction, result)")
+      && storeSource.includes("sameCompactionFailure(state.lastCompactionFailure, failure)")
+      && storeSource.includes("sameCompactionHandoff(state.latestCompactionHandoff, handoff)")
+      && storeSource.includes("state.lastError === error ? {} : { lastError: error }"),
+    "UI store skips identical workspace, startup, compaction, handoff, and error writes",
+  );
+  assert(
+    storeSource.includes("setRuntimeStatus: (status) => set((state) => {")
+      && storeSource.includes("const changed: Partial<RuntimeStatusSummary> = {};"),
+    "UI store diffs runtime-status patches before writing",
+  );
+  assert(
+    storeSource.includes("setUsage: (usage) => set((state) => {")
+      && storeSource.includes("const changed: Partial<Pick<ColonyViewState, \"tokensUsed\" | \"costUsd\" | \"callCount\" | \"deniedCount\">> = {};"),
+    "UI store diffs usage patches before writing",
+  );
+  assert(
+    storeSource.includes("setThinkingState: (isThinking, thinkingPhase = \"\") => set((state) => {")
+      && storeSource.includes("state.isThinking === isThinking && state.thinkingPhase === thinkingPhase"),
+    "UI store diffs thinking-state patches before writing",
+  );
+  assert(
+    loopBridgeSource.includes("if (samePersistedSessionSummaries(persistedSessionsRef.current, sessions)) {"),
+    "Loop bridge skips persisted-session refresh churn when catalog is unchanged",
+  );
+  assert(
+    loopBridgeSource.includes("currentStore.setThinkingState(true, statusLabel(event));"),
+    "Loop bridge uses guarded thinking-state setter during streaming status events",
+  );
+  assert(
+    loopBridgeSource.includes("if (")
+      && loopBridgeSource.includes("!sameProviderDiagnostics(")
+      && loopBridgeSource.includes("providerHealthRef.current,")
+      && loopBridgeSource.includes("failoverEventsRef.current,")
+      && loopBridgeSource.includes("currentStore.setProviderDiagnostics(providerHealth, recentFailovers);"),
+    "Loop bridge skips unchanged provider diagnostics while preserving runtime-status updates",
+  );
+  assert(
+    componentsSource.includes("providerHealth?: Record<string, RuntimeProviderHealthSnapshot>;"),
+    "Budget widget props use shared provider-health snapshot types",
+  );
+  assert(
+    componentsSource.includes("recentFailovers?: RuntimeFailoverSnapshot[];"),
+    "Budget widget props use shared failover snapshot types",
+  );
+}
+
 async function verifyStartupDiagnostics(): Promise<void> {
   section("5. Startup Diagnostics");
 
@@ -615,6 +1024,22 @@ async function verifyStartupDiagnostics(): Promise<void> {
   const reportText = formatStartupReport(localMissing);
   assert(reportText.includes("Startup checks"), "Formatted startup report has summary");
   assert(reportText.includes("Ollama server"), "Formatted startup report includes failing check");
+  assertEqual(startupDoctorFocusCommand(localMissing), "/doctor local", "Startup focus helper targets local runtime failures");
+  assertEqual(
+    startupDoctorInspectCommands(localMissing).join(" | "),
+    "/doctor | /doctor local | /doctor errors | /doctor warnings | /doctor first-run",
+    "Startup inspect helper includes focused doctor commands",
+  );
+  assertEqual(
+    formatStartupPlaceholder(localMissing),
+    "Startup blocked: Ollama server | /doctor local | /doctor first-run",
+    "Startup placeholder uses focused doctor commands",
+  );
+  assertEqual(
+    formatStartupBlockMessage(localMissing),
+    "Startup blocked: Ollama server - Cannot connect to http://localhost:11434: Error: connect refused\nFix: Install/start Ollama or configure cloud fallback.\nInspect: /doctor | /doctor local | /doctor errors | /doctor warnings | /doctor first-run",
+    "Startup block message uses focused doctor commands",
+  );
 
   const anthropicDefault = await runStartupDiagnostics({
     llmConfig: {
@@ -985,8 +1410,10 @@ async function main(): Promise<void> {
   await verifyGeminiProvider();
   await verifyPromptTemplates();
   await verifyPromptRuntimeContext();
+  await verifySharedRuntimeSnapshotContract();
   await verifyWorkspaceDetection();
   await verifyWorkspaceToolingBoundary();
+  await verifyGatewaySnapshotBuilders();
   await verifyStartupDiagnostics();
   await verifyRateLimiter();
   await verifyEffortResolver();

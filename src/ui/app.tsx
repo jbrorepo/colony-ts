@@ -12,8 +12,16 @@ import { executeCommand, SlashCommandParser } from "../gateway";
 import { recommendCompaction } from "../runtime/compaction";
 import type { SerializedMessage } from "../runtime/message";
 import { formatPendingApprovalMessage } from "../runtime/approval";
-import { formatStartupPlaceholder } from "../runtime/startup-diagnostics";
-import type { PersistedSessionSummary } from "../runtime/session-recovery";
+import {
+  formatStartupPlaceholder,
+  startupDoctorFocusCommand,
+} from "../runtime/startup-diagnostics";
+import {
+  buildLiveCurrentHistoryHint,
+  buildLiveSessionShortcutSnapshot,
+  resolveSmartHistoryCommand,
+  resolveSmartResumeCommand,
+} from "../runtime/session-shortcuts";
 import {
   Header,
   LogPane,
@@ -70,6 +78,16 @@ function logMessageToSerializedMessage(message: LogMessage): SerializedMessage {
   };
 }
 
+const BUDGET_RECOMMENDATION_HISTORY_LIMIT = 160;
+
+function buildCompactionRecommendationHistory(
+  messages: LogMessage[],
+  limit = BUDGET_RECOMMENDATION_HISTORY_LIMIT,
+): SerializedMessage[] {
+  const start = Math.max(messages.length - limit, 0);
+  return messages.slice(start).map(logMessageToSerializedMessage);
+}
+
 const ColonyApp: React.FC = () => {
   const { exit } = useApp();
   const {
@@ -78,6 +96,11 @@ const ColonyApp: React.FC = () => {
     resetSession,
     resumeSession,
     setProviderSelection,
+    setMemoryTruthMode,
+    startSwarm,
+    cancelSwarm,
+    resumeSwarm,
+    retrySwarmStage,
     loadSessionHistory,
     compactNow,
     resolveApproval,
@@ -150,15 +173,23 @@ const ColonyApp: React.FC = () => {
         },
         startupReport: runtimeSummary.startupReport,
         sessions: runtimeSummary.persistedSessions,
+        swarm: {
+          runs: runtimeSummary.swarmRuns,
+        },
         runtime: {
           provider: store.provider,
           model: store.model,
           selectedProvider: runtimeSummary.defaultProvider,
           selectedModel: runtimeSummary.defaultModel,
+          memoryTruthModeOverride: runtimeSummary.memoryTruthModeOverride,
+          lastMemoryRecall: runtimeSummary.lastMemoryRecall,
           providerDefaults: runtimeSummary.providerDefaults,
           circuitState: store.circuitState,
-          activeRun: Boolean(store.activeRunId),
+          activeRun: Boolean(store.activeRunId || store.interruptRequested),
           isThinking: store.isThinking,
+          interruptRequested: store.interruptRequested,
+          queuedPromptCount: store.queuedPromptCount,
+          queuedPromptPreview: store.queuedPromptPreview,
           pendingCompactionStrategy: runtimeSummary.pendingCompactionStrategy,
           availableProviders: runtimeSummary.availableProviders,
           failover: runtimeSummary.failover,
@@ -174,6 +205,7 @@ const ColonyApp: React.FC = () => {
           active: permissionSummary.active,
           sessionRules: store.sessionAllowRules,
         },
+        toolDefinitions: runtimeSummary.toolDefinitions,
         budget: {
           maxUsd: store.maxUsd,
           maxTokens: store.maxTokens,
@@ -193,6 +225,7 @@ const ColonyApp: React.FC = () => {
 
       void executeCommand(command, {
         submitChat: submit,
+        queueChat: submit,
         exitApp: () => { setTimeout(() => exit(), 300); },
         cancelRun: cancel,
         resetSession: () => {
@@ -207,6 +240,11 @@ const ColonyApp: React.FC = () => {
           current.setBudgetVisible(true);
         },
         setProviderSelection,
+        setMemoryTruthMode,
+        startSwarm,
+        cancelSwarm,
+        resumeSwarm,
+        retrySwarmStage,
         showSystemMessage: (message) => {
           if (!message) return;
           useColonyStore.getState().addMessage("system", message);
@@ -216,10 +254,11 @@ const ColonyApp: React.FC = () => {
           useColonyStore.getState().addMessage("error", message);
         },
         loadSessionHistory,
-        isRunActive: () => Boolean(useColonyStore.getState().activeRunId),
+        isRunActive: () => Boolean(useColonyStore.getState().activeRunId || useColonyStore.getState().interruptRequested),
+        isRunCancelling: () => useColonyStore.getState().interruptRequested,
       });
     },
-    [cancel, compactNow, exit, getPermissionSummary, getRuntimeSummary, latestCompactionHandoff, loadSessionHistory, recentCompactions, recentHookEvents, resetSession, resumeSession, setProviderSelection, submit],
+    [cancel, cancelSwarm, compactNow, exit, getPermissionSummary, getRuntimeSummary, latestCompactionHandoff, loadSessionHistory, recentCompactions, recentHookEvents, resetSession, resumeSession, resumeSwarm, retrySwarmStage, setMemoryTruthMode, setProviderSelection, startSwarm, submit],
   );
 
   const openSessionCatalog = useCallback(() => {
@@ -228,19 +267,18 @@ const ColonyApp: React.FC = () => {
 
   const openSmartHistory = useCallback(() => {
     const store = useColonyStore.getState();
-    if (store.sessionId && store.messages.length > 0) {
-      handleSubmit("/history current 8");
-      return;
-    }
-
-    const pendingSession = store.persistedSessions.find((session) => session.interruption !== "none");
-    if (pendingSession) {
-      handleSubmit("/history pending 8");
-      return;
-    }
-
-    if (store.persistedSessions.length > 0) {
-      handleSubmit("/history latest 8");
+    const shortcuts = buildLiveSessionShortcutSnapshot({
+      currentSessionId: store.sessionId,
+      currentMessageCount: store.messages.length,
+      currentLatestMessageTimestamp:
+        store.messages.length > 0 ? store.messages[store.messages.length - 1]?.timestamp ?? null : null,
+      currentAwaitingReply:
+        store.messages.length > 0 ? store.messages[store.messages.length - 1]?.role === "user" : false,
+      persistedSessions: store.persistedSessions,
+    });
+    const command = resolveSmartHistoryCommand(shortcuts, 8);
+    if (command) {
+      handleSubmit(command);
       return;
     }
 
@@ -249,14 +287,18 @@ const ColonyApp: React.FC = () => {
 
   const resumeSmartSession = useCallback(() => {
     const store = useColonyStore.getState();
-    const pendingSession = store.persistedSessions.find((session) => session.interruption !== "none");
-    if (pendingSession) {
-      handleSubmit("/resume pending");
-      return;
-    }
-
-    if (store.persistedSessions.length > 0) {
-      handleSubmit("/resume latest");
+    const shortcuts = buildLiveSessionShortcutSnapshot({
+      currentSessionId: store.sessionId,
+      currentMessageCount: store.messages.length,
+      currentLatestMessageTimestamp:
+        store.messages.length > 0 ? store.messages[store.messages.length - 1]?.timestamp ?? null : null,
+      currentAwaitingReply:
+        store.messages.length > 0 ? store.messages[store.messages.length - 1]?.role === "user" : false,
+      persistedSessions: store.persistedSessions,
+    });
+    const command = resolveSmartResumeCommand(shortcuts);
+    if (command) {
+      handleSubmit(command);
       return;
     }
 
@@ -307,7 +349,9 @@ const ColonyApp: React.FC = () => {
     }
 
     if (key.ctrl && input === "c") {
-      if (useColonyStore.getState().activeRunId) {
+      if (useColonyStore.getState().interruptRequested) {
+        useColonyStore.getState().addMessage("system", "Cancellation already in progress.");
+      } else if (useColonyStore.getState().activeRunId) {
         cancel();
       } else {
         useColonyStore.getState().addMessage("system", "No active operation. Use /exit to leave The Colony.");
@@ -315,7 +359,7 @@ const ColonyApp: React.FC = () => {
       return;
     }
 
-    if (key.escape && useColonyStore.getState().activeRunId) {
+    if (key.escape && useColonyStore.getState().activeRunId && !useColonyStore.getState().interruptRequested) {
       cancel();
     }
   }, { isActive: isRawModeSupported });
@@ -378,9 +422,10 @@ const HeaderPanel = React.memo(function HeaderPanel() {
 const WelcomePanel = React.memo(function WelcomePanel() {
   const hasMessages = useColonyStore((state) => state.messages.length > 0);
   const caste = useColonyStore((state) => String(state.caste));
+  const memoryTruthModeOverride = useColonyStore((state) => state.memoryTruthModeOverride);
 
   if (hasMessages) return null;
-  return <WelcomeBanner caste={caste} />;
+  return <WelcomeBanner caste={caste} memoryTruthModeOverride={memoryTruthModeOverride} />;
 });
 
 const LogPanel = React.memo(function LogPanel() {
@@ -412,6 +457,7 @@ const BudgetPanel = React.memo(function BudgetPanel() {
   const model = useColonyStore((state) => state.model);
   const selectedProvider = useColonyStore((state) => state.selectedProvider);
   const selectedModel = useColonyStore((state) => state.selectedModel);
+  const memoryTruthModeOverride = useColonyStore((state) => state.memoryTruthModeOverride);
   const currentSessionId = useColonyStore((state) => state.sessionId);
   const currentAgentId = useColonyStore((state) => state.agentId);
   const currentCaste = useColonyStore((state) => String(state.caste));
@@ -438,7 +484,7 @@ const BudgetPanel = React.memo(function BudgetPanel() {
   const compactionRecommendation = React.useMemo(() => recommendCompaction({
     pendingStrategy: pendingCompactionStrategy,
     contextUsage,
-    history: currentMessages.map(logMessageToSerializedMessage),
+    history: buildCompactionRecommendationHistory(currentMessages),
     messageCount: currentMessages.length,
     caste: currentCaste,
   }), [contextUsage, currentCaste, currentMessages, pendingCompactionStrategy]);
@@ -473,6 +519,7 @@ const BudgetPanel = React.memo(function BudgetPanel() {
         model={model}
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
+        memoryTruthModeOverride={memoryTruthModeOverride}
         currentSessionId={currentSessionId}
         currentAgentId={currentAgentId}
         currentCaste={currentCaste}
@@ -495,53 +542,9 @@ const BudgetPanel = React.memo(function BudgetPanel() {
   );
 });
 
-function buildLiveHistoryHint(options: {
-  currentSessionId: string;
-  currentMessageCount: number;
-  currentLatestMessageTimestamp: number | null;
-  currentAwaitingReply: boolean;
-  persistedSessions: PersistedSessionSummary[];
-}): string {
-  const {
-    currentSessionId,
-    currentMessageCount,
-    currentLatestMessageTimestamp,
-    currentAwaitingReply,
-    persistedSessions,
-  } = options;
-  if (!currentSessionId) return "/history current 8";
-
-  const hasCurrentHistory = currentMessageCount > 0;
-  const latestPersisted = persistedSessions[0];
-  const latestPersistedId = latestPersisted?.sessionId != null ? String(latestPersisted.sessionId) : "";
-  const latestPersistedTime = Date.parse(
-    String(latestPersisted?.lastMessageAt ?? latestPersisted?.savedAt ?? ""),
-  );
-  const newestInterruptedId = persistedSessions.find((session) => session.interruption !== "none")?.sessionId ?? null;
-  const currentPendingAlias = hasCurrentHistory
-    && currentAwaitingReply
-    && (newestInterruptedId === null || String(newestInterruptedId) === currentSessionId);
-  const currentLatestAlias = hasCurrentHistory
-    && (
-      persistedSessions.length === 0
-      || latestPersistedId === currentSessionId
-      || !Number.isFinite(latestPersistedTime)
-      || (
-        Number.isFinite(currentLatestMessageTimestamp)
-        && Number(currentLatestMessageTimestamp) > latestPersistedTime
-      )
-    );
-
-  return [
-    "/history current 8",
-    currentPendingAlias ? "/history pending 8" : null,
-    currentLatestAlias ? "/history latest 8" : null,
-    `/history ${currentSessionId} 8`,
-  ].filter(Boolean).join(" | ");
-}
-
 const StatusPanel = React.memo(function StatusPanel() {
   const activeRun = useColonyStore((state) => Boolean(state.activeRunId));
+  const interruptRequested = useColonyStore((state) => state.interruptRequested);
   const isThinking = useColonyStore((state) => state.isThinking);
   const thinkingPhase = useColonyStore((state) => state.thinkingPhase);
   const currentSessionId = useColonyStore((state) => state.sessionId);
@@ -553,6 +556,8 @@ const StatusPanel = React.memo(function StatusPanel() {
     state.messages.length > 0 ? state.messages[state.messages.length - 1]?.role === "user" : false,
   );
   const pendingApprovalTool = useColonyStore((state) => state.pendingApproval?.toolName ?? null);
+  const queuedPromptCount = useColonyStore((state) => state.queuedPromptCount);
+  const queuedPromptPreview = useColonyStore((state) => state.queuedPromptPreview);
   const loopDetected = useColonyStore((state) => state.loopDetected);
   const loopTool = useColonyStore((state) => state.loopTool);
   const circuitState = useColonyStore((state) => state.circuitState);
@@ -560,26 +565,32 @@ const StatusPanel = React.memo(function StatusPanel() {
   const model = useColonyStore((state) => state.model);
   const selectedProvider = useColonyStore((state) => state.selectedProvider);
   const selectedModel = useColonyStore((state) => state.selectedModel);
+  const memoryTruthModeOverride = useColonyStore((state) => state.memoryTruthModeOverride);
   const toolCount = useColonyStore((state) => state.toolCount);
   const pendingCompactionStrategy = useColonyStore((state) => state.pendingCompactionStrategy);
   const startupReport = useColonyStore((state) => state.startupReport);
   const recentFailovers = useColonyStore((state) => state.recentFailovers);
   const recentHookEvents = useColonyStore((state) => state.recentHookEvents);
   const persistedSessions = useColonyStore((state) => state.persistedSessions);
-  const activeHistoryHint = buildLiveHistoryHint({
+  const liveSessionShortcuts = buildLiveSessionShortcutSnapshot({
     currentSessionId,
     currentMessageCount,
     currentLatestMessageTimestamp,
     currentAwaitingReply,
     persistedSessions,
   });
+  const activeHistoryHint = buildLiveCurrentHistoryHint(liveSessionShortcuts, 8);
+  const startupInspectCommand = startupDoctorFocusCommand(startupReport);
 
   return (
     <StatusBar
       activeRun={activeRun}
+      interruptRequested={interruptRequested}
       isThinking={isThinking}
       thinkingLabel={thinkingPhase}
       activeHistoryHint={activeHistoryHint}
+      queuedPromptCount={queuedPromptCount}
+      queuedPromptPreview={queuedPromptPreview}
       pendingApprovalTool={pendingApprovalTool}
       loopDetected={loopDetected}
       loopTool={loopTool}
@@ -588,10 +599,12 @@ const StatusPanel = React.memo(function StatusPanel() {
       model={model}
       selectedProvider={selectedProvider}
       selectedModel={selectedModel}
+      memoryTruthModeOverride={memoryTruthModeOverride}
       toolCount={toolCount}
       pendingCompactionStrategy={pendingCompactionStrategy}
       startupErrors={startupReport?.errorCount ?? 0}
       startupWarnings={startupReport?.warningCount ?? 0}
+      startupInspectCommand={startupInspectCommand}
       recentFailoverCount={recentFailovers.length}
       recentHookCount={recentHookEvents.length}
       sessionCatalogCount={persistedSessions.length}
@@ -609,6 +622,7 @@ const InputPanel = React.memo(function InputPanel({ handleSubmit, inputLocked }:
   const query = useColonyStore((state) => state.query);
   const setQuery = useColonyStore((state) => state.setQuery);
   const activeRun = useColonyStore((state) => Boolean(state.activeRunId));
+  const interruptRequested = useColonyStore((state) => state.interruptRequested);
   const isThinking = useColonyStore((state) => state.isThinking);
   const currentSessionId = useColonyStore((state) => state.sessionId);
   const currentMessageCount = useColonyStore((state) => state.messages.length);
@@ -620,13 +634,14 @@ const InputPanel = React.memo(function InputPanel({ handleSubmit, inputLocked }:
   );
   const startupReport = useColonyStore((state) => state.startupReport);
   const persistedSessions = useColonyStore((state) => state.persistedSessions);
-  const activeHistoryHint = buildLiveHistoryHint({
+  const liveSessionShortcuts = buildLiveSessionShortcutSnapshot({
     currentSessionId,
     currentMessageCount,
     currentLatestMessageTimestamp,
     currentAwaitingReply,
     persistedSessions,
   });
+  const activeHistoryHint = buildLiveCurrentHistoryHint(liveSessionShortcuts, 8);
   const startupPlaceholder = formatStartupPlaceholder(startupReport);
 
   return (
@@ -643,6 +658,8 @@ const InputPanel = React.memo(function InputPanel({ handleSubmit, inputLocked }:
         placeholder={
           inputLocked
             ? "Approval pending: y once, n deny, a exact-call, s inspect, esc cancel"
+            : interruptRequested
+              ? `Stopping current run... /status /cost ${activeHistoryHint}`
             : isThinking
               ? `Streaming response... /cancel or Ctrl+C/Esc stops | /status /cost ${activeHistoryHint}`
               : activeRun

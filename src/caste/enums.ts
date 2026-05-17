@@ -24,6 +24,159 @@ export enum Caste {
 }
 
 // ---------------------------------------------------------------------------
+// MethodCaste - 12-caste launch framework, layered over legacy runtime values
+// ---------------------------------------------------------------------------
+
+export enum MethodCaste {
+  QUEEN = "queen",
+  ELDEST = "eldest",
+  ASSIST_ANT = "assist_ant",
+  COMMAND_ANT = "command_ant",
+  VIGIL_ANT = "vigil_ant",
+  DEVELOP_ANT = "develop_ant",
+  LOGIST_ANT = "logist_ant",
+  CONSULT_ANT = "consult_ant",
+  INFORM_ANT = "inform_ant",
+  COGNIZ_ANT = "cogniz_ant",
+  ACCOUNT_ANT = "account_ant",
+  OPER_ANT = "oper_ant",
+}
+
+export interface CasteCompatibilityRecord {
+  methodCaste: MethodCaste;
+  displayName: string;
+  legacyCaste?: Caste;
+  aliases: string[];
+}
+
+const METHOD_CASTE_COMPATIBILITY: CasteCompatibilityRecord[] = [
+  {
+    methodCaste: MethodCaste.QUEEN,
+    displayName: "Queen",
+    legacyCaste: Caste.ROOT_QUEEN,
+    aliases: ["queen", "root_queen", "root queen"],
+  },
+  {
+    methodCaste: MethodCaste.ELDEST,
+    displayName: "Eldest",
+    legacyCaste: Caste.ELDEST_ARCHITECT,
+    aliases: ["eldest", "eldest_architect", "eldest architect"],
+  },
+  {
+    methodCaste: MethodCaste.ASSIST_ANT,
+    displayName: "Assist-Ant",
+    legacyCaste: Caste.ASSIST_ANT,
+    aliases: ["assist_ant", "assist ant", "assist-ant"],
+  },
+  {
+    methodCaste: MethodCaste.COMMAND_ANT,
+    displayName: "Command-ant",
+    aliases: ["command_ant", "command ant", "command-ant"],
+  },
+  {
+    methodCaste: MethodCaste.VIGIL_ANT,
+    displayName: "Vigil-ant",
+    legacyCaste: Caste.SHIELD_GENERALS,
+    aliases: ["vigil_ant", "vigil ant", "vigil-ant", "shield_generals", "shield generals", "shield general"],
+  },
+  {
+    methodCaste: MethodCaste.DEVELOP_ANT,
+    displayName: "Develop-ant",
+    legacyCaste: Caste.FORGE_CARVERS,
+    aliases: ["develop_ant", "develop ant", "develop-ant", "forge_carvers", "forge carvers", "forge carver"],
+  },
+  {
+    methodCaste: MethodCaste.LOGIST_ANT,
+    displayName: "Logist-ant",
+    legacyCaste: Caste.CORE_SHAPERS,
+    aliases: ["logist_ant", "logist ant", "logist-ant", "core_shapers", "core shapers", "core shaper"],
+  },
+  {
+    methodCaste: MethodCaste.CONSULT_ANT,
+    displayName: "Consult-ant",
+    legacyCaste: Caste.WATCHER_SWARM,
+    aliases: ["consult_ant", "consult ant", "consult-ant", "watcher_swarm", "watcher swarm", "watcher"],
+  },
+  {
+    methodCaste: MethodCaste.INFORM_ANT,
+    displayName: "Inform-ant",
+    legacyCaste: Caste.LIAISON_ANTS,
+    aliases: ["inform_ant", "inform ant", "inform-ant", "liaison_ants", "liaison ants", "liaison ant"],
+  },
+  {
+    methodCaste: MethodCaste.COGNIZ_ANT,
+    displayName: "Cogniz-ant",
+    legacyCaste: Caste.LORE_BURROW,
+    aliases: ["cogniz_ant", "cogniz ant", "cogniz-ant", "lore_burrow", "lore burrow", "lore keeper"],
+  },
+  {
+    methodCaste: MethodCaste.ACCOUNT_ANT,
+    displayName: "Account-ant",
+    legacyCaste: Caste.LEDGER_ANTS,
+    aliases: ["account_ant", "account ant", "account-ant", "ledger_ants", "ledger ants", "ledger ant"],
+  },
+  {
+    methodCaste: MethodCaste.OPER_ANT,
+    displayName: "Oper-ant",
+    legacyCaste: Caste.NAMELESS_SWARM,
+    aliases: ["oper_ant", "oper ant", "oper-ant", "nameless_swarm", "nameless swarm", "nameless agent", "nameless worker"],
+  },
+];
+
+const METHOD_CASTE_BY_ALIAS = new Map<string, MethodCaste>();
+
+for (const record of METHOD_CASTE_COMPATIBILITY) {
+  METHOD_CASTE_BY_ALIAS.set(record.methodCaste, record.methodCaste);
+  METHOD_CASTE_BY_ALIAS.set(normalizeCasteKey(record.displayName), record.methodCaste);
+  if (record.legacyCaste) METHOD_CASTE_BY_ALIAS.set(record.legacyCaste, record.methodCaste);
+  for (const alias of record.aliases) {
+    METHOD_CASTE_BY_ALIAS.set(normalizeCasteKey(alias), record.methodCaste);
+  }
+}
+
+export function normalizeCasteKey(caste: string): string {
+  return caste.trim().toLowerCase().replace(/[-\s]+/g, "_");
+}
+
+export function listMethodCastes(): MethodCaste[] {
+  return METHOD_CASTE_COMPATIBILITY.map((record) => record.methodCaste);
+}
+
+export function listCasteCompatibilityRecords(): CasteCompatibilityRecord[] {
+  return METHOD_CASTE_COMPATIBILITY.map((record) => ({
+    ...record,
+    aliases: [...record.aliases],
+  }));
+}
+
+export function resolveMethodCaste(caste: string): MethodCaste {
+  const key = normalizeCasteKey(caste);
+  const methodCaste = METHOD_CASTE_BY_ALIAS.get(key);
+  if (!methodCaste) {
+    throw new Error(`Unknown caste: ${caste}`);
+  }
+  return methodCaste;
+}
+
+export function tryResolveMethodCaste(caste: string): MethodCaste | undefined {
+  return METHOD_CASTE_BY_ALIAS.get(normalizeCasteKey(caste));
+}
+
+export function methodCasteForLegacyCaste(caste: Caste | string): MethodCaste {
+  return resolveMethodCaste(String(caste));
+}
+
+export function legacyCasteForMethodCaste(methodCaste: MethodCaste | string): Caste | undefined {
+  const resolved = resolveMethodCaste(String(methodCaste));
+  return METHOD_CASTE_COMPATIBILITY.find((record) => record.methodCaste === resolved)?.legacyCaste;
+}
+
+export function casteDisplayName(caste: MethodCaste | Caste | string): string {
+  const resolved = resolveMethodCaste(String(caste));
+  return METHOD_CASTE_COMPATIBILITY.find((record) => record.methodCaste === resolved)?.displayName ?? String(caste);
+}
+
+// ---------------------------------------------------------------------------
 // Workflow states (Phase 6 acceptance-test catalog)
 // ---------------------------------------------------------------------------
 

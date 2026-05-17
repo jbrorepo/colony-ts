@@ -1,3 +1,10 @@
+import {
+  casteDisplayName,
+  listCasteCompatibilityRecords,
+  normalizeCasteKey,
+  tryResolveMethodCaste,
+} from "./caste/enums";
+
 export interface GatewayBasicCommandPayload {
   output: string;
   data?: Record<string, unknown>;
@@ -6,28 +13,35 @@ export interface GatewayBasicCommandPayload {
 }
 
 export const COMMAND_HELP: Record<string, string> = {
-  "/swarm":       "Active-agent alias; real multi-agent swarm pending",
+  "/swarm":       "Start, inspect, or cancel planner/worker/reviewer swarm runs",
   "/sessions":    "List/search/filter saved sessions by pending/current state",
   "/history":     "Show current, latest, pending, or saved session tail",
-  "/artifact":    "Inspect or list persisted large tool output under Colony storage",
-  "/budget":      "Set cost budget cap in USD (e.g. /budget 1.00)",
-  "/model":       "Show or switch model for selected or named provider",
-  "/perf":        "Unified performance dashboard across models, providers, tools, hooks, and runtime events",
-  "/tools":       "Inspect active, pending, and recent tool activity",
-  "/events":      "Inspect recent runtime events across tools, hooks, compaction, and failovers",
+  "/artifact":    "list persisted large tool outputs, reopen exact artifacts, or inspect latest under Colony storage",
+  "/budget":      "Show current cost/token caps, inspect budget status/spend, or set USD cap",
+  "/model":       "Show selected provider/model, set current model, or switch next-run provider/model",
+  "/memory":      "Show/set memory recall mode, routing/palace views, preview /memory plan <query> (auto, exact, derived, balanced, prefer-exact, prefer-derived)",
+  "/perf":        "Unified performance dashboard across runtime, models, providers, tools, hooks, and compactions",
+  "/tools":       "Inspect active tools, approvals, recent activity, artifacts, perf, policy, and exact-call rules",
+  "/events":      "Inspect recent runtime events, failures, tools, hooks, compactions, failovers, and perf",
+  "/workflow":    "Inspect workflow runs, active/paused checkpoints, retries, and artifacts",
+  "/daemon":      "Inspect remote daemon endpoint, auth scopes, and remote sessions",
+  "/channels":    "Inspect channel adapters, deliveries, auth, sessions, contract-only fixtures, and external vendor helper state",
+  "/browser":     "Inspect descriptor-only browser sidecar boundaries, scopes, and safety contracts",
+  "/skills":      "search/inspect/audit/plan/staged SKILL.md catalog entries, approvals, source drift, safe imports, and promotion rollback views",
+  "/capabilities": "Inspect GStack-inspired Colony capability tracks and next implementation slices",
   "/cancel":      "Cancel active run without leaving The Colony",
   "/clear":       "Clear conversation history, preserve system prompt",
-  "/compact":     "Trigger, inspect, or auto-pick compaction (e.g. /compact status, /compact recent, /compact handoff, /compact smart)",
+  "/compact":     "Trigger standard/micro/reactive/session_memory/cached_micro/context_collapse, smart, or inspect status/recent/handoff pressure and failure",
   "/help":        "Show this help message",
-  "/status":      "Show session, runtime, context, and cost status",
-  "/cost":        "Show cost summary, model usage, or budget detail",
+  "/status":      "Show session, runtime, saved, workspace, tools, workflow, operator, and drill-down status",
+  "/cost":        "Show cost summary, models, budget, perf, and drill-down views",
   "/caste":       "Show current caste and description",
-  "/permissions": "List allowed and denied tools",
+  "/permissions": "Inspect active schemas, allowed/denied tools, and session rules",
   "/resume":      "Resume a persisted session by ID, prefix, index, latest, or pending",
-  "/hooks":       "Inspect registered and recent runtime hooks",
-  "/doctor":      "Show startup diagnostics, filters, and fixes",
-  "/workspace":   "Show detected workspace details",
-  "/provider":    "Show or switch provider summary, health, failovers, or one provider",
+  "/hooks":       "Inspect registered hooks, recent events, perf, and kinds",
+  "/doctor":      "Show diagnostics, first-run, workspace, providers, and failovers",
+  "/workspace":   "Inspect workspace packages, dev/verify commands, stack, and globs",
+  "/provider":    "Show/switch provider summary, health, failovers, performance, or current provider",
   "/exit":        "Exit The Colony (alias: /quit)",
 };
 
@@ -56,18 +70,31 @@ export function formatHelp(commands: Record<string, string> = COMMAND_HELP): str
 export function renderCasteView(caste: string): string {
   const descriptions: Record<string, string> = {
     assist_ant: "General-purpose assistant - The Colony's primary interface agent.",
-    root_queen: "Supreme authority - full access to all Colony subsystems.",
-    forge_carvers: "Specialist builders - code creation and software engineering.",
-    core_shapers: "Infrastructure specialists - system configuration and services.",
-    lore_burrow: "Knowledge agents - research, summarization, and organization.",
-    liaison_ants: "Communication specialists - external messaging and reports.",
-    ledger_ants: "Data specialists - analytics, metrics, and structured reports.",
-    watcher_swarm: "Monitoring agents - observation, scanning, and status reporting.",
-    shield_generals: "Security specialists - threat analysis and policy enforcement.",
-    eldest_architect: "Technical architects - systems design and engineering standards.",
-    nameless_swarm: "Sandboxed workers - constrained execution for isolated tasks.",
+    queen: "Supreme authority - full access to all Colony subsystems.",
+    develop_ant: "Specialist builders - code creation and software engineering.",
+    logist_ant: "Infrastructure specialists - system configuration and services.",
+    cogniz_ant: "Knowledge agents - research, summarization, and organization.",
+    inform_ant: "Communication specialists - external messaging and reports.",
+    account_ant: "Data specialists - analytics, metrics, and structured reports.",
+    consult_ant: "Review and observability agents - verification, evidence, and status reporting.",
+    vigil_ant: "Security specialists - threat analysis and policy enforcement.",
+    eldest: "Technical architects - systems design and engineering standards.",
+    command_ant: "Planning coordinators - task routing, sequencing, and execution plans.",
+    oper_ant: "Sandboxed workers - constrained execution for isolated tasks.",
   };
-  return `Current Caste: ${caste}\n\n${descriptions[caste] ?? "Custom caste - no description available."}`;
+  const methodCaste = tryResolveMethodCaste(caste);
+  const displayName = formatOperatorCaste(caste);
+  const description = methodCaste
+    ? descriptions[methodCaste] ?? "Custom caste - no description available."
+    : "Custom caste - no description available.";
+  const legacyAlias = methodCaste
+    ? listCasteCompatibilityRecords().find((record) => record.methodCaste === methodCaste)?.legacyCaste
+    : undefined;
+  const lines = [`Current Caste: ${displayName}`, "", description];
+  if (legacyAlias && normalizeCasteKey(caste) !== methodCaste) {
+    lines.push("", `Compatibility alias: ${legacyAlias}`);
+  }
+  return lines.join("\n");
 }
 
 export function formatStatus(info: {
@@ -80,11 +107,12 @@ export function formatStatus(info: {
   costUsd: number;
   state: string;
 }): string {
+  const casteDisplay = formatOperatorCaste(info.caste);
   return [
     "┌─ Session Status ────────────────────────────────────────┐",
     `│  Session:    ${info.sessionId.padEnd(42)}│`,
     `│  Agent:      ${info.agentId.padEnd(42)}│`,
-    `│  Caste:      ${info.caste.padEnd(42)}│`,
+    `│  Caste:      ${casteDisplay.padEnd(42)}│`,
     `│  State:      ${info.state.padEnd(42)}│`,
     `│  Messages:   ${String(info.messageCount).padEnd(42)}│`,
     `│  Iterations: ${String(info.iterations).padEnd(42)}│`,
@@ -95,9 +123,10 @@ export function formatStatus(info: {
 }
 
 export function formatCaste(caste: string, description?: string): string {
-  const desc = description ?? `The ${caste} caste`;
+  const displayName = formatOperatorCaste(caste);
+  const desc = description ?? `The ${displayName} caste`;
   return [
-    `Current Caste: ${caste}`,
+    `Current Caste: ${displayName}`,
     `${desc}`,
   ].join("\n");
 }
@@ -109,8 +138,9 @@ export function formatPermissions(
   denied: string[],
   sessionRules: string[],
 ): string {
+  const casteDisplay = formatOperatorCaste(caste);
   const lines = [
-    `┌─ Tool Permissions (${caste}) ${"─".repeat(Math.max(0, 35 - caste.length))}┐`,
+    `┌─ Tool Permissions (${casteDisplay}) ${"─".repeat(Math.max(0, 35 - casteDisplay.length))}┐`,
   ];
   if (active.length > 0) {
     lines.push("│  Active tool schemas:");
@@ -147,18 +177,19 @@ export function formatPermissions(
   return lines.join("\n");
 }
 
-export function buildSwarmCommandPayload(message: string): GatewayBasicCommandPayload {
-  if (!message) {
-    return {
-      output: "Usage: /swarm <message>",
-      isError: true,
-    };
+function formatOperatorCaste(caste: string): string {
+  try {
+    return casteDisplayName(caste);
+  } catch {
+    return caste
+      .trim()
+      .toLowerCase()
+      .replace(/[-\s]+/g, "_")
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
   }
-  return {
-    output: "/swarm currently routes to the active agent only. Real multi-agent swarm arrives in Phase 4.",
-    data: { action: "chat", message, mode: "active-agent-alias" },
-    action: { kind: "submit", message },
-  };
 }
 
 export function buildBudgetCommandPayload(opts: {

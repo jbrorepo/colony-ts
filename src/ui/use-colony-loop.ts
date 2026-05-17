@@ -6,9 +6,11 @@
  */
 
 import { startTransition, useCallback, useEffect, useRef } from "react";
+import { join } from "path";
 
 import { Caste } from "../caste/enums";
 import type { FailoverEvent } from "../llm/failover-executor";
+import type { MemoryTruthMode } from "../memory/hybrid-memory";
 import { TokenBucketRateLimiter } from "../llm/rate-limiter";
 import { ColonyMemoryService } from "../memory/service";
 import type { LLMConfig } from "../llm/selector";
@@ -27,6 +29,7 @@ import {
   CompactionEngine,
   ContextWindowTracker,
   formatCompactionResult,
+  isCompactionUpgrade,
   type CompactionStrategy,
   type CompactionResult,
 } from "../runtime/compaction";
@@ -42,6 +45,7 @@ import {
   type ToolResult,
 } from "../runtime/loop";
 import { PromptBuilder } from "../runtime/prompt-builder";
+import { createUserMessageQueue } from "../runtime/message-queue";
 import { addMessage, createAgentSession, type AgentSession } from "../runtime/session";
 import {
   createSessionRecoverySnapshot,
@@ -53,6 +57,11 @@ import {
   type SessionHistoryExcerpt,
   type PersistedSessionSummary,
 } from "../runtime/session-recovery";
+import {
+  buildRuntimeContextSnapshot,
+  type RuntimeContextSnapshot,
+  type RuntimeMemoryRecallSnapshot,
+} from "../runtime/runtime-snapshot";
 import { buildRuntimeTooling } from "../runtime/runtime-tooling";
 import { ToolExecutor, ToolRegistry } from "../runtime/tools-registry";
 import {
@@ -66,7 +75,20 @@ import {
   type StartupReport,
 } from "../runtime/startup-diagnostics";
 import { detectWorkspace } from "../runtime/workspace";
-import { useColonyStore } from "./store";
+import {
+  samePersistedSessionSummaries,
+  sameProviderDiagnostics,
+  useColonyStore,
+} from "./store";
+import type { GatewayToolDefinitionView } from "../gateway-tools";
+import {
+  ColonySwarmRuntime,
+  JsonSwarmRunStore,
+  createAgentLoopSwarmStageRunner,
+  type SwarmExecutionMode,
+  type SwarmStage,
+} from "../orchestrator";
+import { getDataPath, settings } from "../settings";
 
 const STREAM_FLUSH_MS = 50;
 const DEFAULT_AGENT_ID = "assist-ant";
@@ -140,6 +162,34 @@ function summarizePromptToolActivity(
   return recent;
 }
 
+function normalizeRecoveredFailoverEvents(
+  events: Array<Partial<FailoverEvent>>,
+): FailoverEvent[] {
+  return events.flatMap((event) => {
+    if (
+      typeof event.fromProvider !== "string"
+      || typeof event.fromModel !== "string"
+      || typeof event.toProvider !== "string"
+      || typeof event.toModel !== "string"
+      || typeof event.errorType !== "string"
+      || typeof event.errorMessage !== "string"
+      || typeof event.timestamp !== "number"
+    ) {
+      return [];
+    }
+
+    return [{
+      fromProvider: event.fromProvider,
+      fromModel: event.fromModel,
+      toProvider: event.toProvider,
+      toModel: event.toModel,
+      errorType: event.errorType,
+      errorMessage: event.errorMessage,
+      timestamp: event.timestamp,
+    }];
+  });
+}
+
 interface RuntimeContext {
   session: AgentSession;
   registry: ToolRegistry;
@@ -162,6 +212,11 @@ export interface ColonyLoopControls {
   resetSession: () => void;
   resumeSession: (sessionId: string) => Promise<void>;
   setProviderSelection: (provider: string, model?: string) => Promise<void>;
+  setMemoryTruthMode: (mode: MemoryTruthMode | null) => Promise<void>;
+  startSwarm: (objective: string, executionMode?: SwarmExecutionMode) => Promise<string>;
+  cancelSwarm: (runId: string) => Promise<string>;
+  resumeSwarm: (runId: string) => Promise<string>;
+  retrySwarmStage: (runId: string, stage: SwarmStage) => Promise<string>;
   loadSessionHistory: (sessionId: string, count: number) => Promise<SessionHistoryExcerpt | null>;
   compactNow: (
     strategy?: CompactionStrategy,
@@ -171,6 +226,8 @@ export interface ColonyLoopControls {
   getRuntimeSummary: () => {
     defaultProvider: string;
     defaultModel: string;
+    memoryTruthModeOverride: MemoryTruthMode | null;
+    lastMemoryRecall: RuntimeMemoryRecallSnapshot | null;
     providerDefaults: Record<string, string>;
     pendingCompactionStrategy: CompactionStrategy | null;
     availableProviders: string[];
@@ -190,8 +247,10 @@ export interface ColonyLoopControls {
     persistedSessions: PersistedSessionSummary[];
     activeToolIds: string[];
     permittedToolIds: string[];
+    toolDefinitions: GatewayToolDefinitionView[];
     startupReport: StartupReport | null;
     supportedHookKinds: string[];
+    swarmRuns: ReturnType<ColonySwarmRuntime["listRuns"]>;
   };
   getPermissionSummary: () => {
     active: string[];
@@ -260,6 +319,7 @@ function currentWorkspaceRoot(): string | null {
 
 function buildRuntime(workspaceRoot = currentWorkspaceRoot()): RuntimeContext {
   const tooling = buildRuntimeTooling(DEFAULT_AGENT_ID, DEFAULT_CASTE, workspaceRoot);
+  const workspaceInfo = useColonyStore.getState().workspaceInfo;
 
   const systemPrompt = PromptBuilder.buildSystemPrompt({
     caste: DEFAULT_CASTE,
@@ -270,6 +330,12 @@ function buildRuntime(workspaceRoot = currentWorkspaceRoot()): RuntimeContext {
   let session = createAgentSession({
     agentId: DEFAULT_AGENT_ID,
     caste: DEFAULT_CASTE,
+    metadata: workspaceInfo ? {
+      workspaceRoot: workspaceInfo.root,
+      workspaceName: workspaceInfo.name,
+      workspaceIntent: workspaceInfo.workspaceIntent,
+      workspacePrimaryTargets: [...workspaceInfo.workspacePrimaryTargets],
+    } : {},
   });
   session = addMessage(session, createSystemMessage(systemPrompt, 100));
 
@@ -305,6 +371,9 @@ function applyProviderSelection(runtime: RuntimeContext, provider: string, model
   runtime.llmConfig.casteModels = {
     ...runtime.llmConfig.casteModels,
     [DEFAULT_CASTE]: { provider, model: selectedModel },
+    eldest_architect: { provider, model: selectedModel },
+    forge_carvers: { provider, model: selectedModel },
+    watcher_swarm: { provider, model: selectedModel },
   };
   return { provider, model: selectedModel };
 }
@@ -434,7 +503,7 @@ function buildLoopPromptContext(opts: {
     memoryContext: memoryContext ?? null,
     workspace: store.workspaceInfo,
     startupReport,
-    runtime: {
+    runtime: buildRuntimeContextSnapshot({
       provider:
         store.provider
         || runtime.llmConfig.defaults.provider,
@@ -451,6 +520,7 @@ function buildLoopPromptContext(opts: {
         || runtime.llmConfig.defaults.model
         || runtime.llmConfig.providers[runtime.llmConfig.defaults.provider]?.defaultModel
         || DEFAULT_LOCAL_MODEL,
+      memoryTruthModeOverride: store.memoryTruthModeOverride,
       availableProviders: Object.keys(runtime.llmConfig.providers).sort(),
       failover: Object.fromEntries(
         Object.entries(runtime.llmConfig.failover ?? {}).map(([provider, chain]) => [
@@ -459,12 +529,15 @@ function buildLoopPromptContext(opts: {
         ]),
       ),
       circuitState: store.circuitState,
+      queuedPromptCount: store.queuedPromptCount,
+      queuedPromptPreview: store.queuedPromptPreview,
       providerHealth: Object.fromEntries(
         Object.entries(store.providerHealth).map(([provider, snapshot]) => [
           provider,
           { ...snapshot },
         ]),
       ),
+      interruptRequested: store.interruptRequested,
       recentFailovers: store.recentFailovers.map((event) => ({ ...event })),
       recentToolActivity: summarizePromptToolActivity(store.messages, 3),
       recentHookEvents: store.recentHookEvents.map((event) => ({ ...event })),
@@ -500,6 +573,7 @@ function buildLoopPromptContext(opts: {
       lastCompactionFailureStrategy: store.lastCompactionFailure?.strategy,
       lastCompactionFailureMessage: store.lastCompactionFailure?.message,
       pendingCompactionStrategy: store.pendingCompactionStrategy,
+      lastMemoryRecall: store.lastMemoryRecall,
       lastCompactionStrategy: store.lastCompaction?.strategyUsed,
       lastCompactionTrigger: store.lastCompaction?.triggerSource,
       lastCompactionSavedTokens: store.lastCompaction?.tokensSavedEstimate,
@@ -509,7 +583,7 @@ function buildLoopPromptContext(opts: {
       lastCompactionPreservedSystemCount: store.lastCompaction?.preservedSystemCount,
       startupErrors: startupReport?.errorCount ?? 0,
       startupWarnings: startupReport?.warningCount ?? 0,
-    },
+    } satisfies RuntimeContextSnapshot),
   };
 }
 
@@ -529,9 +603,24 @@ export function useColonyLoop(): ColonyLoopControls {
   const persistedSessionsRef = useRef<PersistedSessionSummary[]>([]);
   const selectedProviderRef = useRef("local");
   const selectedModelRef = useRef(DEFAULT_LOCAL_MODEL);
+  const memoryTruthModeRef = useRef<MemoryTruthMode | null>(null);
+  const lastMemoryRecallRef = useRef<RuntimeMemoryRecallSnapshot | null>(null);
+  const queuedPromptQueueRef = useRef(createUserMessageQueue());
+  const swarmRuntimeRef = useRef<ColonySwarmRuntime | null>(null);
+
+  const syncQueuedPromptState = useCallback(() => {
+    const queued = queuedPromptQueueRef.current.peek();
+    useColonyStore.getState().setQueuedPrompt(
+      queuedPromptQueueRef.current.depth(),
+      queued?.content ?? null,
+    );
+  }, []);
 
   const refreshPersistedSessions = useCallback(async () => {
     const sessions = await listPersistedSessions({ limit: 10 });
+    if (samePersistedSessionSummaries(persistedSessionsRef.current, sessions)) {
+      return;
+    }
     persistedSessionsRef.current = sessions;
     useColonyStore.getState().setPersistedSessions(sessions);
   }, []);
@@ -573,6 +662,7 @@ export function useColonyLoop(): ColonyLoopControls {
       lastCompactionFailure: ReturnType<typeof useColonyStore.getState>["lastCompactionFailure"];
       lastCompaction: ReturnType<typeof useColonyStore.getState>["lastCompaction"];
       latestCompactionHandoff: ReturnType<typeof useColonyStore.getState>["latestCompactionHandoff"];
+      lastMemoryRecall: ReturnType<typeof useColonyStore.getState>["lastMemoryRecall"];
     }> = {},
   ) => {
     const store = useColonyStore.getState();
@@ -589,6 +679,8 @@ export function useColonyLoop(): ColonyLoopControls {
       },
       sessionAllowRules: overrides.sessionAllowRules ?? runtime.approvalPolicy.listRules(),
       contextUsage: overrides.contextUsage ?? store.contextUsage,
+      memoryTruthModeOverride: memoryTruthModeRef.current,
+      lastMemoryRecall: overrides.lastMemoryRecall ?? store.lastMemoryRecall,
       providerHealth: providerHealthRef.current,
       recentFailovers: failoverEventsRef.current.slice(-5).map((event) => ({ ...event })),
       recentHookEvents: store.recentHookEvents.map((event) => ({ ...event })),
@@ -639,6 +731,7 @@ export function useColonyLoop(): ColonyLoopControls {
       model: selectedModelRef.current,
       selectedProvider: selectedProviderRef.current,
       selectedModel: selectedModelRef.current,
+      memoryTruthModeOverride: memoryTruthModeRef.current,
       circuitState: "closed",
     });
   }, []);
@@ -653,26 +746,32 @@ export function useColonyLoop(): ColonyLoopControls {
         },
       ]),
     );
-
-    providerHealthRef.current = providerHealth;
-    failoverEventsRef.current = loop.failoverEvents.slice(-5);
+    const recentFailovers = loop.failoverEvents.slice(-5).map((event) => ({
+      fromProvider: event.fromProvider,
+      fromModel: event.fromModel,
+      toProvider: event.toProvider,
+      toModel: event.toModel,
+      errorType: event.errorType,
+      errorMessage: event.errorMessage,
+      timestamp: event.timestamp,
+    }));
 
     const currentStore = useColonyStore.getState();
     const activeCandidate = loop.lastSuccessfulCandidate;
     const providerName = activeCandidate?.providerName ?? currentStore.provider;
     const modelName = activeCandidate?.modelId ?? currentStore.model;
-    currentStore.setProviderDiagnostics(
-      providerHealth,
-      failoverEventsRef.current.map((event) => ({
-        fromProvider: event.fromProvider,
-        fromModel: event.fromModel,
-        toProvider: event.toProvider,
-        toModel: event.toModel,
-        errorType: event.errorType,
-        errorMessage: event.errorMessage,
-        timestamp: event.timestamp,
-      })),
-    );
+    if (
+      !sameProviderDiagnostics(
+        providerHealthRef.current,
+        providerHealth,
+        failoverEventsRef.current,
+        recentFailovers,
+      )
+    ) {
+      providerHealthRef.current = providerHealth;
+      failoverEventsRef.current = recentFailovers;
+      currentStore.setProviderDiagnostics(providerHealth, recentFailovers);
+    }
     currentStore.setRuntimeStatus({
       provider: providerName,
       model: modelName,
@@ -685,10 +784,12 @@ export function useColonyLoop(): ColonyLoopControls {
 
   const getRuntimeSummary = useCallback(() => {
     const runtime = getRuntime();
-    return {
-      defaultProvider: selectedProviderRef.current,
-      defaultModel: selectedModelRef.current,
-      providerDefaults: Object.fromEntries(
+      return {
+        defaultProvider: selectedProviderRef.current,
+        defaultModel: selectedModelRef.current,
+        memoryTruthModeOverride: memoryTruthModeRef.current,
+        lastMemoryRecall: lastMemoryRecallRef.current,
+        providerDefaults: Object.fromEntries(
         Object.entries(runtime.llmConfig.providers).map(([provider, config]) => [
           provider,
           config.defaultModel,
@@ -711,8 +812,15 @@ export function useColonyLoop(): ColonyLoopControls {
       persistedSessions: persistedSessionsRef.current.map((session) => ({ ...session })),
       activeToolIds: [...runtime.activeToolIds],
       permittedToolIds: [...runtime.permittedToolIds],
+      toolDefinitions: runtime.registry.listTools().map((tool) => ({
+        toolId: tool.toolId,
+        category: tool.category,
+        requiresApproval: tool.requiresApproval,
+        metadata: tool.metadata,
+      })),
       startupReport: startupReportRef.current,
       supportedHookKinds: [...SUPPORTED_RUNTIME_HOOK_KINDS],
+      swarmRuns: swarmRuntimeRef.current?.listRuns() ?? [],
     };
   }, [getRuntime]);
 
@@ -727,14 +835,28 @@ export function useColonyLoop(): ColonyLoopControls {
         model: selected.model,
         selectedProvider: selected.provider,
         selectedModel: selected.model,
+        memoryTruthModeOverride: memoryTruthModeRef.current,
       });
       return;
     }
     useColonyStore.getState().setRuntimeStatus({
       selectedProvider: selected.provider,
       selectedModel: selected.model,
+      memoryTruthModeOverride: memoryTruthModeRef.current,
     });
   }, [getRuntime]);
+
+  const setMemoryTruthMode = useCallback(async (mode: MemoryTruthMode | null): Promise<void> => {
+    memoryTruthModeRef.current = mode;
+    const store = useColonyStore.getState();
+    store.setMemoryTruthModeOverride(mode);
+    store.setRuntimeStatus({
+      memoryTruthModeOverride: mode,
+    });
+    if (runtimeRef.current) {
+      await persistRuntimeState(runtimeRef.current);
+    }
+  }, [persistRuntimeState]);
 
   const requestApproval = useCallback((request: ApprovalRequest): Promise<ApprovalDecision> => {
     return new Promise((resolve) => {
@@ -832,6 +954,105 @@ export function useColonyLoop(): ColonyLoopControls {
     };
   }, [getRuntime]);
 
+  const getSwarmRuntime = useCallback((): ColonySwarmRuntime => {
+    if (swarmRuntimeRef.current) return swarmRuntimeRef.current;
+    const rootDir = join(getDataPath(settings), "swarm");
+    const runner = createAgentLoopSwarmStageRunner({
+      createLoop: ({ stage }) => {
+        const runtime = getRuntime();
+        const store = useColonyStore.getState();
+        const caste = stage === "plan"
+          ? Caste.ELDEST_ARCHITECT
+          : stage === "execute"
+            ? Caste.FORGE_CARVERS
+            : Caste.WATCHER_SWARM;
+        const session = createAgentSession({
+          agentId: `swarm-${stage}`,
+          caste,
+          metadata: {
+            launchAlpha0: true,
+            swarmStage: stage,
+            parentSessionId: runtime.session.sessionId,
+          },
+        });
+        return new AgentLoop({
+          session,
+          config: {
+            tenant: "launch-alpha0-swarm",
+            providerName: selectedProviderRef.current,
+            model: selectedModelRef.current,
+            maxIterations: 4,
+            costBudgetUsd: store.maxUsd,
+          },
+          costTracker: new CostTracker(selectedModelRef.current, store.maxUsd),
+          toolExecutor: executeTool,
+          toolSchemas: runtime.registry.toPromptSchema(runtime.activeToolIds),
+          toolCategories: runtime.toolCategories,
+          approvalHandler: requestApproval,
+          approvalPolicy: runtime.approvalPolicy,
+          auditTrail: runtime.auditTrail,
+          rateLimiter: runtime.rateLimiter,
+          toolResultStorage: new ToolResultStorage({ sessionId: session.sessionId }),
+          promptContext: buildLoopPromptContext({
+            runtime,
+            store,
+            startupReport: startupReportRef.current,
+            memoryContext: null,
+          }),
+          llmConfig: runtime.llmConfig,
+        });
+      },
+    });
+    swarmRuntimeRef.current = new ColonySwarmRuntime({
+      store: new JsonSwarmRunStore({ rootDir }),
+      llmRunner: runner,
+    });
+    return swarmRuntimeRef.current;
+  }, [executeTool, getRuntime, requestApproval]);
+
+  const startSwarm = useCallback(async (
+    objective: string,
+    executionMode: SwarmExecutionMode = "coordinator_only",
+  ): Promise<string> => {
+    const runtime = getSwarmRuntime();
+    await runtime.loadPersistedRuns();
+    const snapshot = await runtime.startObjective({
+      objective,
+      executionMode,
+      title: executionMode === "llm" ? "Launch Alpha LLM swarm" : "Swarm execution",
+    });
+    return [
+      `Started swarm ${snapshot.runId}.`,
+      `Mode: ${snapshot.executionMode}`,
+      `Status: ${snapshot.status}`,
+      `Inspect: /swarm status ${snapshot.runId}`,
+    ].join("\n");
+  }, [getSwarmRuntime]);
+
+  const cancelSwarm = useCallback(async (runId: string): Promise<string> => {
+    const runtime = getSwarmRuntime();
+    await runtime.loadPersistedRuns();
+    const snapshot = await runtime.cancelRun(runId, "operator cancelled swarm");
+    if (!snapshot) return `Swarm run not found: ${runId}`;
+    return `Cancelled swarm ${snapshot.runId}. Status: ${snapshot.status}`;
+  }, [getSwarmRuntime]);
+
+  const resumeSwarm = useCallback(async (runId: string): Promise<string> => {
+    const runtime = getSwarmRuntime();
+    await runtime.loadPersistedRuns();
+    const snapshot = await runtime.resumeRun(runId);
+    if (!snapshot) return `Swarm run not found: ${runId}`;
+    return `Resumed swarm ${snapshot.runId}. Status: ${snapshot.status}`;
+  }, [getSwarmRuntime]);
+
+  const retrySwarmStage = useCallback(async (runId: string, stage: SwarmStage): Promise<string> => {
+    const runtime = getSwarmRuntime();
+    await runtime.loadPersistedRuns();
+    const snapshot = await runtime.retryStage(runId, stage);
+    if (!snapshot) return `Swarm run not found: ${runId}`;
+    return `Retried swarm ${snapshot.runId} stage ${stage}. Status: ${snapshot.status}`;
+  }, [getSwarmRuntime]);
+
   const recordRuntimeHook = useCallback(async (event: HookEvent) => {
     const detail = event.kind === "PreToolUse" || event.kind === "PostToolUse"
       ? String((event.data?.toolName as string | undefined) ?? "")
@@ -905,6 +1126,7 @@ export function useColonyLoop(): ColonyLoopControls {
   }, []);
 
   const cancel = useCallback(() => {
+    const store = useColonyStore.getState();
     if (approvalResolverRef.current) {
       resolveApproval("cancel");
     }
@@ -912,10 +1134,11 @@ export function useColonyLoop(): ColonyLoopControls {
     loopRef.current?.kill();
     flushBufferedDelta();
     clearFlushTimer();
-    useColonyStore.getState().finishRun(activeRunIdRef.current ?? undefined);
-    useColonyStore.getState().setPendingCompactionStrategy(null);
-    activeRunIdRef.current = null;
-    useColonyStore.getState().addMessage("system", "Current operation cancelled.");
+    store.requestInterrupt("Stopping current operation...");
+    store.setPendingCompactionStrategy(null);
+    if (!store.interruptRequested) {
+      store.addMessage("system", "Cancellation requested. Finishing current operation...");
+    }
     if (runtimeRef.current) {
       void persistRuntimeState(runtimeRef.current);
     }
@@ -929,9 +1152,13 @@ export function useColonyLoop(): ColonyLoopControls {
     applyProviderSelection(runtimeRef.current, selectedProviderRef.current, selectedModelRef.current);
     providerHealthRef.current = {};
     failoverEventsRef.current = [];
+    queuedPromptQueueRef.current.clear();
+    useColonyStore.getState().setQueuedPrompt(0, null);
     useColonyStore.getState().setProviderDiagnostics({}, []);
     useColonyStore.setState((current) => ({ ...current, recentHookEvents: [], recentCompactions: [] }));
     useColonyStore.getState().setLatestCompactionHandoff(null);
+    memoryTruthModeRef.current = null;
+    useColonyStore.getState().setMemoryTruthModeOverride(null);
     useColonyStore.getState().setPendingCompactionStrategy(null);
     publishRuntime(runtimeRef.current);
     approvalResolverRef.current = null;
@@ -972,6 +1199,8 @@ export function useColonyLoop(): ColonyLoopControls {
     activeRunIdRef.current = null;
     assistantMessageIdRef.current = null;
     bufferedDeltaRef.current = "";
+    queuedPromptQueueRef.current.clear();
+    useColonyStore.getState().setQueuedPrompt(0, null);
 
     const runtime = buildRuntime();
     applyProviderSelection(runtime, selectedProviderRef.current, selectedModelRef.current);
@@ -990,7 +1219,9 @@ export function useColonyLoop(): ColonyLoopControls {
     providerHealthRef.current = Object.fromEntries(
       Object.entries(snapshot.providerHealth).map(([provider, health]) => [provider, { ...health }]),
     );
-    failoverEventsRef.current = snapshot.recentFailovers.map((event) => ({ ...event }));
+    memoryTruthModeRef.current = snapshot.memoryTruthModeOverride;
+    lastMemoryRecallRef.current = snapshot.lastMemoryRecall;
+    failoverEventsRef.current = normalizeRecoveredFailoverEvents(snapshot.recentFailovers);
     useColonyStore.getState().setProviderDiagnostics(
       providerHealthRef.current,
       failoverEventsRef.current,
@@ -1008,6 +1239,7 @@ export function useColonyLoop(): ColonyLoopControls {
         runtime.llmConfig.defaults.model
         ?? runtime.llmConfig.providers[runtime.llmConfig.defaults.provider]?.defaultModel
         ?? DEFAULT_LOCAL_MODEL,
+      memoryTruthModeOverride: snapshot.memoryTruthModeOverride,
       isThinking: false,
       thinkingPhase: "",
       tokensUsed: snapshot.usage.tokensUsed,
@@ -1020,6 +1252,7 @@ export function useColonyLoop(): ColonyLoopControls {
       sessionId: snapshot.session.sessionId,
       agentId: snapshot.session.agentId,
       activeRunId: null,
+      interruptRequested: false,
       lastError: null,
       pendingApproval: null,
       pendingCompactionStrategy: null,
@@ -1030,6 +1263,7 @@ export function useColonyLoop(): ColonyLoopControls {
       recentHookEvents: snapshot.recentHookEvents.map((event) => ({ ...event })),
       recentCompactions: snapshot.recentCompactions.map((event) => ({ ...event })),
       latestCompactionHandoff: snapshot.latestCompactionHandoff ? { ...snapshot.latestCompactionHandoff } : null,
+      lastMemoryRecall: snapshot.lastMemoryRecall ? JSON.parse(JSON.stringify(snapshot.lastMemoryRecall)) : null,
     });
     publishRuntime(runtime);
     useColonyStore.getState().setRuntimeStatus({
@@ -1053,6 +1287,7 @@ export function useColonyLoop(): ColonyLoopControls {
       contextUsage: snapshot.contextUsage,
       lastCompactionFailure: snapshot.lastCompactionFailure,
       lastCompaction: snapshot.lastCompaction,
+      lastMemoryRecall: snapshot.lastMemoryRecall,
     });
   }, [clearFlushTimer, flushBufferedDelta, persistRuntimeState, publishRuntime]);
 
@@ -1079,6 +1314,30 @@ export function useColonyLoop(): ColonyLoopControls {
     };
   }, [getRuntime]);
 
+  const queuePromptSubmission = useCallback((input: string): boolean => {
+    const store = useColonyStore.getState();
+    const queued = queuedPromptQueueRef.current.enqueue(input);
+    syncQueuedPromptState();
+    if (queued.duplicate) {
+      store.addMessage("system", "Prompt already queued for the next Colony run.");
+      return true;
+    }
+    if (!queued.accepted) {
+      return false;
+    }
+    store.addMessage(
+      "system",
+      store.interruptRequested || (!store.activeRunId && Boolean(loopRef.current))
+        ? queued.replaced
+          ? `Queued next prompt after shutdown. Replaced older queued prompt: ${queued.queuedPreview ?? "queued prompt"}`
+          : `Queued next prompt after shutdown: ${queued.queuedPreview ?? "queued prompt"}`
+        : queued.replaced
+          ? `Queued next prompt. Replaced older queued prompt: ${queued.queuedPreview ?? "queued prompt"}`
+          : `Queued next prompt: ${queued.queuedPreview ?? "queued prompt"}`,
+    );
+    return true;
+  }, [syncQueuedPromptState]);
+
   const compactNow = useCallback(async (
     strategy: CompactionStrategy = "standard",
     announceQueuedStatus = true,
@@ -1093,9 +1352,12 @@ export function useColonyLoop(): ColonyLoopControls {
         }
         return null;
       }
-      if (store.pendingCompactionStrategy === "reactive" && strategy !== "reactive") {
+      if (
+        store.pendingCompactionStrategy
+        && !isCompactionUpgrade(store.pendingCompactionStrategy, strategy)
+      ) {
         if (announceQueuedStatus) {
-          store.addMessage("system", "Reactive context compaction already queued. It will run before the next LLM call.");
+          store.addMessage("system", `${store.pendingCompactionStrategy} context compaction already queued. It will run before the next LLM call.`);
         }
         return null;
       }
@@ -1104,8 +1366,8 @@ export function useColonyLoop(): ColonyLoopControls {
       if (announceQueuedStatus) {
         store.addMessage(
           "system",
-          strategy === "reactive"
-            ? "Context compaction upgraded to reactive. It will run before the next LLM call."
+          strategy === "reactive" || strategy === "context_collapse"
+            ? `Context compaction upgraded to ${strategy}. It will run before the next LLM call.`
             : "Context compaction requested. It will run before the next LLM call.",
         );
       }
@@ -1178,16 +1440,10 @@ export function useColonyLoop(): ColonyLoopControls {
     }
   }, [captureCompactionHandoff, captureLoopRuntimeHealth, getRuntime, persistRuntimeState, recordCompactionEvent, recordRuntimeHook, requestApproval]);
 
-  const submit = useCallback(async (input: string) => {
-    const trimmed = input.trim();
+  const startPromptRun = useCallback(async (trimmed: string) => {
     if (!trimmed) return;
 
     const store = useColonyStore.getState();
-    if (store.activeRunId) {
-      store.addMessage("system", "A Colony run is already active. Use /cancel, Ctrl+C, or Esc before starting another.");
-      return;
-    }
-
     const startupBlockMessage = formatStartupBlockMessage(startupReportRef.current);
     if (startupBlockMessage) {
       store.setError(startupBlockMessage);
@@ -1204,7 +1460,14 @@ export function useColonyLoop(): ColonyLoopControls {
     store.setPendingCompactionStrategy(null);
 
     store.addMessage("user", trimmed);
-    const memoryContext = await runtime.memory.buildMemoryContext(trimmed, runtime.session);
+    const memoryContextResult = await runtime.memory.buildMemoryContextResult(trimmed, runtime.session, {
+      truthMode: memoryTruthModeRef.current ?? undefined,
+    });
+    lastMemoryRecallRef.current = memoryContextResult.diagnostics;
+    store.setLastMemoryRecall(memoryContextResult.diagnostics);
+    await persistRuntimeState(runtime, {
+      lastMemoryRecall: memoryContextResult.diagnostics,
+    });
 
     const loop = new AgentLoop({
       session: runtime.session,
@@ -1235,7 +1498,7 @@ export function useColonyLoop(): ColonyLoopControls {
         runtime,
         store,
         startupReport: startupReportRef.current,
-        memoryContext,
+        memoryContext: memoryContextResult.prompt,
       }),
       onCompactionHandoff: captureCompactionHandoff,
       onUpdate: (event) => {
@@ -1269,10 +1532,7 @@ export function useColonyLoop(): ColonyLoopControls {
               costUsd: loop.costTracker.estimatedCostUsd,
               callCount: loop.costTracker.callCount,
             });
-            useColonyStore.setState({
-              isThinking: true,
-              thinkingPhase: statusLabel(event),
-            });
+            currentStore.setThinkingState(true, statusLabel(event));
             break;
 
           case "delta":
@@ -1379,9 +1639,9 @@ export function useColonyLoop(): ColonyLoopControls {
               lastCompaction: loop.lastCompactionResult ?? currentStore.lastCompaction,
             });
             if (
-              event.result.terminationReason !== "complete" &&
-              event.result.terminationReason !== "kill_switch" &&
-              event.result.error
+              event.result.terminationReason !== "complete"
+              && event.result.terminationReason !== "kill_switch"
+              && event.result.error
             ) {
               const message = readableError(event.result.error, runtime.llmConfig);
               const latestStore = useColonyStore.getState();
@@ -1409,11 +1669,15 @@ export function useColonyLoop(): ColonyLoopControls {
       }
       loopRef.current = null;
       const finalStore = useColonyStore.getState();
+      const interruptRequested = finalStore.interruptRequested;
       finalStore.finishRun(runId);
       finalStore.setPendingApproval(null);
       finalStore.setPendingCompactionStrategy(null);
       finalStore.setSessionAllowRules(runtime.approvalPolicy.listRules());
       finalStore.setContextUsage(loop.contextSnapshot);
+      if (interruptRequested) {
+        finalStore.addMessage("system", "Current operation cancelled.");
+      }
       if (loop.lastCompactionFailure) {
         const existingFailure = finalStore.lastCompactionFailure;
         if (
@@ -1454,8 +1718,26 @@ export function useColonyLoop(): ColonyLoopControls {
         });
       }
       activeRunIdRef.current = null;
+      const queuedPrompt = queuedPromptQueueRef.current.dequeue();
+      syncQueuedPromptState();
+      if (queuedPrompt) {
+        finalStore.addMessage("system", `Starting queued prompt: ${queuedPrompt.content}`);
+        void startPromptRun(queuedPrompt.content);
+      }
     }
-  }, [captureCompactionHandoff, captureLoopRuntimeHealth, clearFlushTimer, ensureFlushTimer, executeTool, flushBufferedDelta, getRuntime, handleApprovalRequestEvent, handleApprovalResolvedEvent, persistRuntimeState, recordCompactionEvent, recordRuntimeHook, requestApproval, resetApprovalEventTracking]);
+  }, [captureCompactionHandoff, captureLoopRuntimeHealth, clearFlushTimer, ensureFlushTimer, executeTool, flushBufferedDelta, getRuntime, handleApprovalRequestEvent, handleApprovalResolvedEvent, persistRuntimeState, recordCompactionEvent, recordRuntimeHook, requestApproval, resetApprovalEventTracking, syncQueuedPromptState]);
+
+  const submit = useCallback(async (input: string) => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+
+    const store = useColonyStore.getState();
+    if (store.interruptRequested || store.activeRunId || loopRef.current) {
+      queuePromptSubmission(trimmed);
+      return;
+    }
+    await startPromptRun(trimmed);
+  }, [queuePromptSubmission, startPromptRun]);
 
   useEffect(() => {
     getRuntime();
@@ -1523,6 +1805,11 @@ export function useColonyLoop(): ColonyLoopControls {
     resetSession,
     resumeSession,
     setProviderSelection,
+    setMemoryTruthMode,
+    startSwarm,
+    cancelSwarm,
+    resumeSwarm,
+    retrySwarmStage,
     loadSessionHistory,
     compactNow,
     resolveApproval,

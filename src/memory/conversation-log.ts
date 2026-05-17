@@ -24,8 +24,12 @@ export interface LoggedTurnRecord {
   metadata: Record<string, unknown>;
 }
 
+let lastUtcNowMs = 0;
+
 function utcNow(): string {
-  return new Date().toISOString();
+  const nextMs = Math.max(Date.now(), lastUtcNowMs + 1);
+  lastUtcNowMs = nextMs;
+  return new Date(nextMs).toISOString();
 }
 
 function safeSessionId(sessionId: string): string {
@@ -58,6 +62,10 @@ export class ConversationLogger {
 
   get storageDir(): string {
     return this._storageDir;
+  }
+
+  sessionPath(sessionId: string): string {
+    return this._sessionPath(sessionId);
   }
 
   private _sessionPath(sessionId: string): string {

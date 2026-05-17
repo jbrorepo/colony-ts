@@ -46,6 +46,44 @@ export class ToolTimeoutError extends ToolError {
 // ToolDefinition
 // ---------------------------------------------------------------------------
 
+export type ToolConcurrencyMode = "parallel_safe" | "exclusive";
+export type ToolInterruptMode = "interruptible" | "timeout_only" | "non_interruptible";
+export type ToolProgressMode = "none" | "activity" | "streaming";
+export type ToolTranscriptOutputMode = "inline" | "externalized" | "none";
+export type ToolPersistedResultMode = "threshold" | "always" | "never";
+
+export interface ToolTranscriptMetadata {
+  includeArguments: boolean;
+  searchIndexed: boolean;
+  output: ToolTranscriptOutputMode;
+  redact: boolean;
+}
+
+export interface ToolSearchMetadata {
+  indexed: boolean;
+  queryParameter?: string;
+  pathParameter?: string;
+  resultLimit?: number;
+}
+
+export interface ToolPersistedResultMetadata {
+  mode: ToolPersistedResultMode;
+  thresholdBytes: number;
+  previewBytes: number;
+  redact: boolean;
+}
+
+export interface ToolMetadata extends Record<string, unknown> {
+  readOnly: boolean;
+  destructive: boolean;
+  concurrency: ToolConcurrencyMode;
+  interrupt: ToolInterruptMode;
+  progress: ToolProgressMode;
+  transcript: ToolTranscriptMetadata;
+  search: ToolSearchMetadata;
+  persistedResult: ToolPersistedResultMetadata;
+}
+
 export interface ToolDefinition {
   toolId: string;
   name: string;
@@ -56,13 +94,78 @@ export interface ToolDefinition {
   requiresApproval: boolean;
   timeoutSeconds: number;
   maxOutputBytes: number;
-  metadata: Record<string, unknown>;
+  metadata: ToolMetadata;
+}
+
+export type ToolDefinitionOptions = Omit<
+  Partial<ToolDefinition>,
+  "toolId" | "name" | "metadata"
+> & {
+  metadata?: Partial<ToolMetadata> & Record<string, unknown>;
+};
+
+export const DEFAULT_TOOL_METADATA: ToolMetadata = {
+  readOnly: false,
+  destructive: false,
+  concurrency: "exclusive",
+  interrupt: "interruptible",
+  progress: "activity",
+  transcript: {
+    includeArguments: false,
+    searchIndexed: false,
+    output: "externalized",
+    redact: true,
+  },
+  search: {
+    indexed: false,
+  },
+  persistedResult: {
+    mode: "threshold",
+    thresholdBytes: 10_000,
+    previewBytes: 2_000,
+    redact: true,
+  },
+};
+
+export function normalizeToolMetadata(
+  metadata?: Partial<ToolMetadata> & Record<string, unknown>,
+): ToolMetadata {
+  const transcript = metadata?.transcript && typeof metadata.transcript === "object"
+    ? metadata.transcript
+    : {};
+  const search = metadata?.search && typeof metadata.search === "object"
+    ? metadata.search
+    : {};
+  const persistedResult = metadata?.persistedResult && typeof metadata.persistedResult === "object"
+    ? metadata.persistedResult
+    : {};
+
+  return {
+    ...(metadata ?? {}),
+    readOnly: typeof metadata?.readOnly === "boolean" ? metadata.readOnly : DEFAULT_TOOL_METADATA.readOnly,
+    destructive: typeof metadata?.destructive === "boolean" ? metadata.destructive : DEFAULT_TOOL_METADATA.destructive,
+    concurrency: isToolConcurrency(metadata?.concurrency) ? metadata.concurrency : DEFAULT_TOOL_METADATA.concurrency,
+    interrupt: isToolInterrupt(metadata?.interrupt) ? metadata.interrupt : DEFAULT_TOOL_METADATA.interrupt,
+    progress: isToolProgress(metadata?.progress) ? metadata.progress : DEFAULT_TOOL_METADATA.progress,
+    transcript: {
+      ...DEFAULT_TOOL_METADATA.transcript,
+      ...(transcript as Partial<ToolTranscriptMetadata>),
+    },
+    search: {
+      ...DEFAULT_TOOL_METADATA.search,
+      ...(search as Partial<ToolSearchMetadata>),
+    },
+    persistedResult: {
+      ...DEFAULT_TOOL_METADATA.persistedResult,
+      ...(persistedResult as Partial<ToolPersistedResultMetadata>),
+    },
+  };
 }
 
 export function createToolDefinition(
   toolId: string,
   name: string,
-  opts?: Partial<Omit<ToolDefinition, "toolId" | "name">>,
+  opts?: ToolDefinitionOptions,
 ): ToolDefinition {
   return {
     toolId,
@@ -74,8 +177,20 @@ export function createToolDefinition(
     requiresApproval: opts?.requiresApproval ?? false,
     timeoutSeconds: opts?.timeoutSeconds ?? 30.0,
     maxOutputBytes: opts?.maxOutputBytes ?? 1_048_576, // 1 MiB
-    metadata: opts?.metadata ?? {},
+    metadata: normalizeToolMetadata(opts?.metadata),
   };
+}
+
+function isToolConcurrency(value: unknown): value is ToolConcurrencyMode {
+  return value === "parallel_safe" || value === "exclusive";
+}
+
+function isToolInterrupt(value: unknown): value is ToolInterruptMode {
+  return value === "interruptible" || value === "timeout_only" || value === "non_interruptible";
+}
+
+function isToolProgress(value: unknown): value is ToolProgressMode {
+  return value === "none" || value === "activity" || value === "streaming";
 }
 
 // ---------------------------------------------------------------------------

@@ -7,8 +7,16 @@
  */
 
 import type { LLMMessage } from "../llm/models";
+import { memoryTruthModeLabel } from "../memory/hybrid-memory";
 import { PromptBuilder } from "./prompt-builder";
 import type { SerializedMessage } from "./message";
+import type {
+  RuntimeContextSnapshot,
+  RuntimeFailoverSnapshot,
+  RuntimeHookEventSnapshot,
+  RuntimeProviderHealthSnapshot,
+  RuntimeToolActivitySummary,
+} from "./runtime-snapshot";
 import { TokenEstimationService } from "./token-estimation";
 
 export enum BlockType {
@@ -57,83 +65,11 @@ export interface PromptWorkspaceContext {
   stackHints?: string[];
 }
 
-export interface PromptProviderHealthSnapshot {
-  state?: string;
-  failureCount?: number;
-}
-
-export interface PromptFailoverSnapshot {
-  fromProvider?: string;
-  fromModel?: string;
-  toProvider?: string;
-  toModel?: string;
-  errorType?: string;
-  errorMessage?: string;
-  timestamp?: number;
-}
-
-export interface PromptToolActivitySummary {
-  toolName: string;
-  status: string;
-  detail?: string;
-  artifactPath?: string;
-}
-
-export interface PromptHookEventSnapshot {
-  kind: string;
-  detail?: string;
-  timestamp: number;
-  durationMs?: number;
-}
-
-export interface PromptRuntimeContext {
-  provider?: string;
-  model?: string;
-  selectedProvider?: string;
-  selectedModel?: string;
-  circuitState?: string;
-  availableProviders?: string[];
-  failover?: Record<string, string[]>;
-  providerHealth?: Record<string, PromptProviderHealthSnapshot>;
-  recentFailovers?: PromptFailoverSnapshot[];
-  recentToolActivity?: PromptToolActivitySummary[];
-  recentHookEvents?: PromptHookEventSnapshot[];
-  activeToolIds?: string[];
-  activeToolCount?: number;
-  permittedToolIds?: string[];
-  permittedToolCount?: number;
-  pendingApproval?: boolean;
-  pendingApprovalToolName?: string;
-  pendingApprovalRiskLevel?: "low" | "medium" | "high";
-  pendingApprovalCategory?: string;
-  pendingApprovalSummary?: string;
-  pendingApprovalSignature?: string;
-  pendingApprovalReason?: string;
-  pendingApprovalWarningCount?: number;
-  sessionRuleCount?: number;
-  sessionRules?: string[];
-  budgetUsd?: number | null;
-  budgetSpentUsd?: number;
-  budgetRemainingUsd?: number | null;
-  contextUsedTokens?: number;
-  contextMaxTokens?: number;
-  contextRemainingTokens?: number;
-  contextPercentUsed?: number;
-  contextPressure?: "ok" | "warning" | "blocking";
-  compactionFailureCount?: number;
-  lastCompactionFailureStrategy?: string;
-  lastCompactionFailureMessage?: string;
-  pendingCompactionStrategy?: string | null;
-  lastCompactionStrategy?: string;
-  lastCompactionTrigger?: string;
-  lastCompactionSavedTokens?: number;
-  lastCompactionSummaryLineCount?: number;
-  lastCompactionSummarizedMessages?: number;
-  lastCompactionPreservedRecentCount?: number;
-  lastCompactionPreservedSystemCount?: number;
-  startupErrors?: number;
-  startupWarnings?: number;
-}
+export type PromptProviderHealthSnapshot = RuntimeProviderHealthSnapshot;
+export type PromptFailoverSnapshot = RuntimeFailoverSnapshot;
+export type PromptToolActivitySummary = RuntimeToolActivitySummary;
+export type PromptHookEventSnapshot = RuntimeHookEventSnapshot;
+export type PromptRuntimeContext = RuntimeContextSnapshot;
 
 export interface PromptSessionContext {
   sessionId?: string;
@@ -489,6 +425,7 @@ export class PromptAssembler {
       if (runtime.circuitState) {
         lines.push(`- Circuit: ${runtime.circuitState}`);
       }
+      lines.push(`- Memory recall mode: ${memoryTruthModeLabel(runtime.memoryTruthModeOverride ?? null)}`);
       if (runtime.availableProviders?.length) {
         lines.push(`- Available providers: ${runtime.availableProviders.join(", ")}`);
       }
@@ -636,7 +573,7 @@ export class PromptAssembler {
         }
         if (typeof runtime.lastCompactionSummarizedMessages === "number") {
           details.push(
-            runtime.lastCompactionStrategy === "micro"
+            runtime.lastCompactionStrategy === "micro" || runtime.lastCompactionStrategy === "cached_micro"
               ? `trimmed ${runtime.lastCompactionSummarizedMessages} tool results`
               : `summarized ${runtime.lastCompactionSummarizedMessages}`,
           );

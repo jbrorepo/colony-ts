@@ -13,7 +13,7 @@ import { join } from "path";
 
 import { Caste } from "./caste/enums";
 import { ColonyMemoryService } from "./memory/service";
-import { ExtractedMemoryStore, MemoryExtractor } from "./memory/extractor";
+import { ExtractedMemoryStore, MemoryExtractor, inferStructuredMemoryCategoryHints } from "./memory/extractor";
 import { createAssistantMessage, createSystemMessage, createUserMessage, serializeMessage } from "./runtime/message";
 import { PromptBuilder } from "./runtime/prompt-builder";
 import { addMessage, createAgentSession } from "./runtime/session";
@@ -70,6 +70,14 @@ async function verifyExtractorCategoriesAndScope(): Promise<void> {
 
   const constraintMemories = memories.filter((memory) => memory.content.includes("Never install SDK packages"));
   assertEqual(constraintMemories.length, 1, "Extractor deduplicates repeated content by hash");
+
+  const opsMetrics = await extractor.extract([
+    { role: "assistant", content: "SLO p95 latency stayed under 250ms, error budget stayed 0.1%, and throughput target stayed 120 rps during rollout." },
+  ], "assist-ant");
+  assert(opsMetrics.some((memory) => memory.category === "metric" && memory.content.includes("slo p95 latency 250ms")), "Extractor captures SLO p95 latency metric shards");
+  assert(opsMetrics.some((memory) => memory.category === "metric" && memory.content.includes("error budget 0.1%")), "Extractor captures error-budget metric shards");
+  assert(opsMetrics.some((memory) => memory.category === "metric" && memory.content.includes("throughput target 120 rps")), "Extractor captures throughput-target metric shards");
+  assert(inferStructuredMemoryCategoryHints("what p95 SLO did rollout use").has("metric"), "Structured ranking treats p95/SLO queries as metric intent");
 }
 
 async function verifyStoreScopeFilteringAndPersistence(): Promise<void> {
@@ -108,6 +116,30 @@ async function verifyStoreScopeFilteringAndPersistence(): Promise<void> {
     assert(sameAgent.some((record) => record.scope === "agent"), "Matching agent can recall agent-scoped facts");
     assert(!otherAgent.some((record) => record.scope === "agent"), "Different agent cannot recall agent-scoped facts");
     assert(sameAgent.some((record) => record.content.includes("raw fetch only")), "Store ranks relevant colony fact");
+
+    const opsMetricMemories = await extractor.extract([
+      { role: "assistant", content: "SLO p95 latency stayed under 250ms and error budget stayed 0.1% during rollout." },
+    ], "assist-ant");
+    await store.save("ses_ops_metric", "assist_ant", opsMetricMemories);
+    await store.save("ses_ops_noise", "assist_ant", [{
+      content: "Rollout status stayed healthy while release notes mentioned p95 screenshots.",
+      scope: "agent",
+      agentId: "assist-ant",
+      category: "fact",
+      confidence: 1,
+      sourceTurn: 1,
+      source: "keyword",
+      contentHash: "ops_noise",
+      timestamp: Date.now() + 1,
+    }]);
+    const sloMetric = await store.surfaceRelevant({
+      query: "what p95 SLO did rollout use",
+      agentId: "assist-ant",
+      caste: "assist_ant",
+      limit: 3,
+    });
+    assertEqual(sloMetric[0]?.sessionId, "ses_ops_metric", "Store ranks SLO/p95 metric memory over newer topical noise");
+    assert(sloMetric[0]?.matchReasons?.includes("category-metric") === true, "Store preserves metric match reason for SLO/p95 query");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -150,7 +182,9 @@ async function verifyMemoryServiceStructuredContextAndCompactionHandoff(): Promi
     });
     assert(handoff.structured.length >= 1, "Compaction handoff also persists structured memories");
 
-    const context = await memory.buildMemoryContext("raw fetch source truth caveman approval prompts", session);
+    const context = await memory.buildMemoryContext("raw fetch source truth caveman approval prompts", session, {
+      truthMode: "balanced",
+    });
     assert(context.includes("Reusable facts (derived, scoped, durable):"), "Memory context includes reusable facts section");
     assert(context.includes("raw fetch only"), "Memory context surfaces colony decision fact");
     assert(context.includes("agent:assist-ant/pattern"), "Memory context labels agent-scoped facts");

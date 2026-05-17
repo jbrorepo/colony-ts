@@ -105,34 +105,64 @@ export class PalaceStore {
       CREATE INDEX IF NOT EXISTS idx_drawers_source ON drawers(source_file)
     `);
 
-    // FTS5 for keyword search (fallback when no embeddings)
-    this._db.run(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS drawers_fts USING fts5(
-        content, wing, room,
-        content='drawers',
-        content_rowid='rowid'
-      )
-    `);
+    this._ensureFtsSchema();
+  }
+
+  private _ensureFtsSchema(): void {
+    const schemaRow = this._db.query(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'drawers_fts'",
+    ).get() as { sql?: string } | null;
+    const schemaSql = String(schemaRow?.sql ?? "");
+    const needsRebuild = !schemaSql
+      || !schemaSql.includes("hall")
+      || !schemaSql.includes("source_file");
+
+    this._db.run("DROP TRIGGER IF EXISTS drawers_ai");
+    this._db.run("DROP TRIGGER IF EXISTS drawers_ad");
+    this._db.run("DROP TRIGGER IF EXISTS drawers_au");
+
+    if (needsRebuild) {
+      this._db.run("DROP TABLE IF EXISTS drawers_fts");
+      this._db.run(`
+        CREATE VIRTUAL TABLE drawers_fts USING fts5(
+          content, wing, room, hall, source_file,
+          content='drawers',
+          content_rowid='rowid'
+        )
+      `);
+      this._db.run(`
+        INSERT INTO drawers_fts(rowid, content, wing, room, hall, source_file)
+        SELECT rowid, content, wing, room, hall, source_file FROM drawers
+      `);
+    } else {
+      this._db.run(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS drawers_fts USING fts5(
+          content, wing, room, hall, source_file,
+          content='drawers',
+          content_rowid='rowid'
+        )
+      `);
+    }
 
     // Keep FTS in sync via triggers
     this._db.run(`
       CREATE TRIGGER IF NOT EXISTS drawers_ai AFTER INSERT ON drawers BEGIN
-        INSERT INTO drawers_fts(rowid, content, wing, room)
-        VALUES (new.rowid, new.content, new.wing, new.room);
+        INSERT INTO drawers_fts(rowid, content, wing, room, hall, source_file)
+        VALUES (new.rowid, new.content, new.wing, new.room, new.hall, new.source_file);
       END
     `);
     this._db.run(`
       CREATE TRIGGER IF NOT EXISTS drawers_ad AFTER DELETE ON drawers BEGIN
-        INSERT INTO drawers_fts(drawers_fts, rowid, content, wing, room)
-        VALUES ('delete', old.rowid, old.content, old.wing, old.room);
+        INSERT INTO drawers_fts(drawers_fts, rowid, content, wing, room, hall, source_file)
+        VALUES ('delete', old.rowid, old.content, old.wing, old.room, old.hall, old.source_file);
       END
     `);
     this._db.run(`
       CREATE TRIGGER IF NOT EXISTS drawers_au AFTER UPDATE ON drawers BEGIN
-        INSERT INTO drawers_fts(drawers_fts, rowid, content, wing, room)
-        VALUES ('delete', old.rowid, old.content, old.wing, old.room);
-        INSERT INTO drawers_fts(rowid, content, wing, room)
-        VALUES (new.rowid, new.content, new.wing, new.room);
+        INSERT INTO drawers_fts(drawers_fts, rowid, content, wing, room, hall, source_file)
+        VALUES ('delete', old.rowid, old.content, old.wing, old.room, old.hall, old.source_file);
+        INSERT INTO drawers_fts(rowid, content, wing, room, hall, source_file)
+        VALUES (new.rowid, new.content, new.wing, new.room, new.hall, new.source_file);
       END
     `);
   }
@@ -218,6 +248,8 @@ export class PalaceStore {
   list(opts: {
     wing?: string;
     room?: string;
+    hall?: string;
+    sourceFile?: string;
     limit?: number;
     offset?: number;
     orderBy?: "importance" | "created_at";
@@ -227,6 +259,8 @@ export class PalaceStore {
 
     if (opts.wing) { conditions.push("wing = ?"); params.push(opts.wing); }
     if (opts.room) { conditions.push("room = ?"); params.push(opts.room); }
+    if (opts.hall) { conditions.push("hall = ?"); params.push(opts.hall); }
+    if (opts.sourceFile) { conditions.push("source_file = ?"); params.push(opts.sourceFile); }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const order = opts.orderBy === "importance" ? "importance DESC" : "created_at DESC";
@@ -244,6 +278,8 @@ export class PalaceStore {
   search(query: string, opts: {
     wing?: string;
     room?: string;
+    hall?: string;
+    sourceFile?: string;
     nResults?: number;
     maxDistance?: number;
   } = {}): SearchResult {
@@ -262,16 +298,29 @@ export class PalaceStore {
       return { query, filters: {}, totalBeforeFilter: 0, results: [] };
     }
 
-    // Wing/room filtering
-    let wingRoomFilter = "";
+    const totalBeforeFilterRow = this._db.query(
+      "SELECT COUNT(*) as cnt FROM drawers_fts WHERE drawers_fts MATCH ?",
+    ).get(ftsQuery) as { cnt?: number } | null;
+    const totalBeforeFilter = totalBeforeFilterRow?.cnt ?? 0;
+
+    // Wing/room/hall filtering
+    let metadataFilter = "";
     const params: SQLQueryBindings[] = [];
     if (opts.wing) {
-      wingRoomFilter += " AND d.wing = ?";
+      metadataFilter += " AND d.wing = ?";
       params.push(opts.wing);
     }
     if (opts.room) {
-      wingRoomFilter += " AND d.room = ?";
+      metadataFilter += " AND d.room = ?";
       params.push(opts.room);
+    }
+    if (opts.hall) {
+      metadataFilter += " AND d.hall = ?";
+      params.push(opts.hall);
+    }
+    if (opts.sourceFile) {
+      metadataFilter += " AND d.source_file = ?";
+      params.push(opts.sourceFile);
     }
 
     const sql = `
@@ -279,17 +328,27 @@ export class PalaceStore {
       FROM drawers_fts fts
       JOIN drawers d ON d.rowid = fts.rowid
       WHERE drawers_fts MATCH ?
-      ${wingRoomFilter}
-      ORDER BY rank
+      ${metadataFilter}
       LIMIT ?
     `;
 
-    const rows = this._db.query(sql).all(ftsQuery, ...params, nResults) as any[];
+    const rows = this._db.query(sql).all(ftsQuery, ...params, Math.max(nResults * 6, 24)) as any[];
 
-    const hits: SearchHit[] = rows.map((r) => {
+    const hits: SearchHit[] = rows
+      .map((r) => {
       // FTS5 rank is negative — lower is better. Normalize to 0–1 similarity.
       const rawRank = Math.abs(r.rank ?? 0);
-      const similarity = Math.max(0, 1 - rawRank / 10);
+      const lexicalSimilarity = Math.max(0, 1 - rawRank / 10);
+      const importanceScore = clamp01(Number(r.importance ?? 3) / 5);
+      const emotionalScore = clamp01(Number(r.emotional_weight ?? 0.5));
+      const recencyScore = recencyScoreFor(r.created_at);
+      const hierarchySimilarity = clamp01(
+        lexicalSimilarity * 0.66
+        + importanceScore * 0.2
+        + emotionalScore * 0.08
+        + recencyScore * 0.06
+        + exactFilterBoost(query, r, opts),
+      );
       return {
         id: r.id,
         text: r.content,
@@ -297,16 +356,19 @@ export class PalaceStore {
         room: r.room,
         hall: r.hall,
         sourceFile: r.source_file,
-        similarity: Math.round(similarity * 1000) / 1000,
+        similarity: Math.round(hierarchySimilarity * 1000) / 1000,
         distance: Math.round(rawRank * 10000) / 10000,
         metadata: JSON.parse(r.metadata || "{}"),
       };
-    });
+      })
+      .filter((hit) => opts.maxDistance == null || hit.distance <= opts.maxDistance)
+      .sort((left, right) => right.similarity - left.similarity || left.distance - right.distance)
+      .slice(0, nResults);
 
     return {
       query,
-      filters: { wing: opts.wing, room: opts.room },
-      totalBeforeFilter: hits.length,
+      filters: { wing: opts.wing, room: opts.room, hall: opts.hall, sourceFile: opts.sourceFile },
+      totalBeforeFilter,
       results: hits,
     };
   }
@@ -369,6 +431,51 @@ export class PalaceStore {
     return taxonomy;
   }
 
+  /** Full hierarchy: wing, room, hall, source, and wing-room-hall counts. */
+  getHierarchy(): {
+    wings: Record<string, number>;
+    rooms: Record<string, number>;
+    halls: Record<string, number>;
+    sources: Record<string, number>;
+    taxonomy: Record<string, Record<string, Record<string, number>>>;
+  } {
+    const rows = this._db.query(
+      "SELECT wing, room, hall, source_file, COUNT(*) as count FROM drawers GROUP BY wing, room, hall, source_file ORDER BY wing, room, hall, source_file",
+    ).all() as Array<{
+      wing?: string;
+      room?: string;
+      hall?: string;
+      source_file?: string;
+      count?: number;
+    }>;
+
+    const hierarchy = {
+      wings: {} as Record<string, number>,
+      rooms: {} as Record<string, number>,
+      halls: {} as Record<string, number>,
+      sources: {} as Record<string, number>,
+      taxonomy: {} as Record<string, Record<string, Record<string, number>>>,
+    };
+
+    for (const row of rows) {
+      const count = Number(row.count ?? 0);
+      const wing = normalizeHierarchyKey(row.wing, "unknown");
+      const room = normalizeHierarchyKey(row.room, "unknown");
+      const hall = normalizeHierarchyKey(row.hall, "none");
+      const source = normalizeHierarchyKey(row.source_file, "unknown");
+
+      hierarchy.wings[wing] = (hierarchy.wings[wing] ?? 0) + count;
+      hierarchy.rooms[room] = (hierarchy.rooms[room] ?? 0) + count;
+      hierarchy.halls[hall] = (hierarchy.halls[hall] ?? 0) + count;
+      hierarchy.sources[source] = (hierarchy.sources[source] ?? 0) + count;
+      hierarchy.taxonomy[wing] ??= {};
+      hierarchy.taxonomy[wing][room] ??= {};
+      hierarchy.taxonomy[wing][room][hall] = (hierarchy.taxonomy[wing][room][hall] ?? 0) + count;
+    }
+
+    return hierarchy;
+  }
+
   /** Close the database. */
   close(): void {
     this._db.close();
@@ -401,4 +508,62 @@ export class PalaceStore {
       createdAt: row.created_at,
     };
   }
+}
+
+function normalizeHierarchyKey(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function recencyScoreFor(createdAt: unknown): number {
+  if (typeof createdAt !== "string" || createdAt.length === 0) return 0;
+  const timestamp = Date.parse(createdAt);
+  if (!Number.isFinite(timestamp)) return 0;
+  const ageMs = Math.max(0, Date.now() - timestamp);
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  return clamp01(1 - ageDays / 30);
+}
+
+function exactFilterBoost(
+  query: string,
+  row: { wing?: string; room?: string; hall?: string; source_file?: string },
+  opts: { wing?: string; room?: string; hall?: string },
+): number {
+  let boost = 0;
+  if (opts.wing && row.wing === opts.wing) boost += 0.02;
+  if (opts.room && row.room === opts.room) boost += 0.02;
+  if (opts.hall && row.hall === opts.hall) boost += 0.02;
+  boost += sourceFileBoost(query, row.source_file);
+  return boost;
+}
+
+function sourceFileBoost(query: string, sourceFile: string | undefined): number {
+  if (!sourceFile) return 0;
+  const queryTokens = tokenizeSourceRankingText(query);
+  if (queryTokens.length === 0) return 0;
+  const sourceTokens = new Set(tokenizeSourceRankingText(sourceFile));
+  if (sourceTokens.size === 0) return 0;
+  const overlap = queryTokens.reduce((count, token) => count + (sourceTokens.has(token) ? 1 : 0), 0);
+  const overlapScore = overlap / queryTokens.length;
+  const normalizedQuery = normalizeSourceRankingText(query);
+  const normalizedSource = normalizeSourceRankingText(sourceFile);
+  const exactSourceBonus = normalizedQuery.includes(normalizedSource) || normalizedSource.includes(normalizedQuery)
+    ? 0.03
+    : 0;
+  return overlapScore * 0.08 + exactSourceBonus;
+}
+
+function tokenizeSourceRankingText(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((token) => token.length >= 3);
+}
+
+function normalizeSourceRankingText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }

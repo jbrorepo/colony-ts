@@ -6,7 +6,14 @@
  * reusable source of caste identity.
  */
 
-import { Caste } from "../caste/enums";
+import {
+  Caste,
+  MethodCaste,
+  casteDisplayName,
+  listMethodCastes,
+  normalizeCasteKey,
+  resolveMethodCaste,
+} from "../caste/enums";
 
 export interface CastePromptTemplate {
   caste: Caste | string;
@@ -17,7 +24,7 @@ export interface CastePromptTemplate {
   guidelines: string[];
 }
 
-export const CASTE_PROMPT_TEMPLATES: Record<string, CastePromptTemplate> = {
+const LEGACY_CASTE_PROMPT_TEMPLATES: Record<string, CastePromptTemplate> = {
   [Caste.ROOT_QUEEN]: {
     caste: Caste.ROOT_QUEEN,
     title: "Root Queen",
@@ -141,14 +148,80 @@ export const CASTE_PROMPT_TEMPLATES: Record<string, CastePromptTemplate> = {
   },
 };
 
+export const CASTE_PROMPT_TEMPLATES: Record<string, CastePromptTemplate> = buildMethodPromptTemplates();
+
 export function normalizeCasteName(caste: string): string {
-  return caste.toLowerCase().replace(/ /g, "_");
+  try {
+    return resolveMethodCaste(caste);
+  } catch {
+    return normalizeCasteKey(caste);
+  }
 }
 
 export function getCastePromptTemplate(caste: string): CastePromptTemplate {
-  return CASTE_PROMPT_TEMPLATES[normalizeCasteName(caste)] ?? CASTE_PROMPT_TEMPLATES[Caste.ASSIST_ANT];
+  return CASTE_PROMPT_TEMPLATES[normalizeCasteName(caste)] ?? CASTE_PROMPT_TEMPLATES[MethodCaste.ASSIST_ANT];
 }
 
 export function listCastePromptTemplates(): CastePromptTemplate[] {
-  return Object.values(CASTE_PROMPT_TEMPLATES);
+  return listMethodCastes().map((caste) => CASTE_PROMPT_TEMPLATES[caste]);
+}
+
+function buildMethodPromptTemplates(): Record<string, CastePromptTemplate> {
+  const templates: Record<string, CastePromptTemplate> = {
+    [MethodCaste.COMMAND_ANT]: {
+      caste: MethodCaste.COMMAND_ANT,
+      title: "Command-ant",
+      role: "Workflow commander. You sequence work, assign castes, and keep execution behind approval gates.",
+      personality: "Ordered, decisive, and planning-focused. You turn architecture direction into bounded execution.",
+      delegationPrompt: "You are Command-ant - coordinate workflow order, ownership, and safe handoffs without executing mutations directly.",
+      guidelines: [
+        "Assign work only after scope and gates are explicit.",
+        "Route risky transitions through Vigil-ant and Account-ant.",
+      ],
+    },
+  };
+
+  const legacyToMethod: Array<[Caste, MethodCaste]> = [
+    [Caste.ROOT_QUEEN, MethodCaste.QUEEN],
+    [Caste.ELDEST_ARCHITECT, MethodCaste.ELDEST],
+    [Caste.ASSIST_ANT, MethodCaste.ASSIST_ANT],
+    [Caste.SHIELD_GENERALS, MethodCaste.VIGIL_ANT],
+    [Caste.WATCHER_SWARM, MethodCaste.CONSULT_ANT],
+    [Caste.FORGE_CARVERS, MethodCaste.DEVELOP_ANT],
+    [Caste.CORE_SHAPERS, MethodCaste.LOGIST_ANT],
+    [Caste.LIAISON_ANTS, MethodCaste.INFORM_ANT],
+    [Caste.LORE_BURROW, MethodCaste.COGNIZ_ANT],
+    [Caste.LEDGER_ANTS, MethodCaste.ACCOUNT_ANT],
+    [Caste.NAMELESS_SWARM, MethodCaste.OPER_ANT],
+  ];
+
+  for (const [legacy, method] of legacyToMethod) {
+    const source = LEGACY_CASTE_PROMPT_TEMPLATES[legacy];
+    templates[method] = {
+      ...source,
+      caste: method,
+      title: casteDisplayName(method),
+      role: replacePromptCasteTerms(source.role),
+      personality: replacePromptCasteTerms(source.personality),
+      delegationPrompt: replacePromptCasteTerms(source.delegationPrompt),
+      guidelines: source.guidelines.map(replacePromptCasteTerms),
+    };
+  }
+
+  return templates;
+}
+
+function replacePromptCasteTerms(value: string): string {
+  return value
+    .replace(/\bRoot Queen\b/g, "Queen")
+    .replace(/\bEldest Architect\b/g, "Eldest")
+    .replace(/\bAssist Ant\b/g, "Assist-Ant")
+    .replace(/\bShield General\b/g, "Vigil-ant")
+    .replace(/\bWatcher\b/g, "Consult-ant")
+    .replace(/\bForge Carver\b/g, "Develop-ant")
+    .replace(/\bCore Shaper\b/g, "Logist-ant")
+    .replace(/\bLiaison Ant\b/g, "Inform-ant")
+    .replace(/\bLedger Ant\b/g, "Account-ant")
+    .replace(/\bLore Burrow\b/g, "Cogniz-ant")
+    .replace(/\bNameless Worker\b/g, "Oper-ant");
 }

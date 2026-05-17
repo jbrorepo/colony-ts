@@ -7,7 +7,7 @@
  * Run: bun run src/verify-phase13.ts
  */
 
-import { Caste } from "./caste/enums";
+import { Caste, MethodCaste, listMethodCastes } from "./caste/enums";
 import {
   AgentIdentity,
   IdentityError,
@@ -61,7 +61,7 @@ function section(title: string): void {
 function verifyHelpers(): void {
   section("1. Helpers");
 
-  assertEqual(normalizeCasteName("Shield Generals"), "shield_generals", "normalizeCasteName lowercases and underscores");
+  assertEqual(normalizeCasteName("Shield Generals"), MethodCaste.VIGIL_ANT, "normalizeCasteName maps legacy names to method castes");
 
   const persona = createPersonaConfig();
   assertEqual(persona.roleDescription, "", "createPersonaConfig defaults roleDescription");
@@ -76,30 +76,31 @@ function verifyDefaults(): void {
   section("2. Caste Defaults");
 
   const defaults = buildCasteDefaults();
-  assertEqual(Object.keys(defaults).length, Object.values(Caste).length, "Every caste has a default identity");
+  assertEqual(Object.keys(defaults).length, listMethodCastes().length, "Every method caste has a default identity");
 
-  const assist = defaults[Caste.ASSIST_ANT];
+  const assist = defaults[MethodCaste.ASSIST_ANT];
   assertEqual(assist.displayName, "Assist-Ant", "Assist-Ant default display name");
   assertEqual(assist.persona.greetingTemplate, "Hello! I'm your Assist-Ant. How can I help you today?", "Assist-Ant greeting preserved");
   assert(assist.boundaries.includes("Do not execute shell commands"), "Assist-Ant shell boundary preserved");
 
-  const nameless = defaults[Caste.NAMELESS_SWARM];
-  assert(nameless.capabilities.includes("Generate security findings"), "Nameless default capabilities preserved");
-  assert(nameless.boundaries.includes("Do not exfiltrate data outside the colony"), "Nameless default boundaries preserved");
+  const oper = defaults[MethodCaste.OPER_ANT];
+  assert(oper.capabilities.includes("Generate security findings"), "Oper-ant compatibility capabilities preserved");
+  assert(oper.boundaries.includes("Do not exfiltrate data outside the colony"), "Oper-ant compatibility boundaries preserved");
 }
 
 function verifyRegistry(): void {
   section("3. Identity Registry");
 
   const registry = new IdentityRegistry();
-  assertEqual(registry.listAll().length, Object.values(Caste).length, "Registry preloads caste defaults");
+  assertEqual(registry.listAll().length, listMethodCastes().length, "Registry preloads method caste defaults");
 
   const shieldDefaults = registry.getByCaste("Shield Generals");
   assertEqual(shieldDefaults.length, 1, "getByCaste normalizes space-separated caste");
   assertEqual(shieldDefaults[0]?.agentId, "default_shield_generals", "getByCaste returns default shield identity");
+  assertEqual(shieldDefaults[0]?.displayName, "Vigil-ant", "getByCaste returns method display for legacy shield identity");
 
   const defaultForge = registry.getDefaultForCaste(Caste.FORGE_CARVERS);
-  assertEqual(defaultForge.displayName, "Forge Carver", "getDefaultForCaste returns forge identity");
+  assertEqual(defaultForge.displayName, "Develop-ant", "getDefaultForCaste returns method display for forge compatibility identity");
   assertThrows(
     () => registry.getDefaultForCaste("unknown_caste"),
     "No default identity for caste",
@@ -147,8 +148,8 @@ function verifyRegistry(): void {
   assert(!registry.unregister("missing_agent"), "unregister returns false for missing identity");
 
   registry.reset();
-  assertEqual(registry.listAll().length, Object.values(Caste).length, "reset restores only defaults");
-  assertEqual(registry.get("default_forge_carvers")?.displayName, "Forge Carver", "reset restores original default identity");
+  assertEqual(registry.listAll().length, listMethodCastes().length, "reset restores only method defaults");
+  assertEqual(registry.get("default_forge_carvers")?.displayName, "Develop-ant", "reset restores method default identity");
 }
 
 function verifyPromptRendering(): void {
@@ -191,7 +192,7 @@ function verifyPromptRendering(): void {
   assert(resolvedByAgent.includes("Prompt Agent"), "toPromptBlock prefers agent_id over caste");
 
   const resolvedByCaste = registry.toPromptBlock("", Caste.ROOT_QUEEN);
-  assert(resolvedByCaste.includes("## Identity: Root Queen"), "toPromptBlock falls back to caste default");
+  assert(resolvedByCaste.includes("## Identity: Queen"), "toPromptBlock falls back to method caste default");
 
   const noManifestoResolved = registry.toPromptBlock("", Caste.ROOT_QUEEN, { includeManifesto: false });
   assert(!noManifestoResolved.includes("## The Colony Manifesto"), "toPromptBlock forwards manifesto option");

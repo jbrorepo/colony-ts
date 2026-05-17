@@ -1,16 +1,39 @@
 import type { CompactionStrategy } from "./runtime/compaction";
+import type { MemoryTruthMode } from "./memory/hybrid-memory";
+import type {
+  RuntimeCompactionEventSnapshot,
+  RuntimeCompactionHandoffSnapshot,
+  RuntimeContextSnapshot,
+} from "./runtime/runtime-snapshot";
+import type { SwarmRunSnapshot } from "./orchestrator";
+import type {
+  SwarmExecutionMode,
+  SwarmStage,
+} from "./orchestrator";
 import type {
   HistoryFilterMode,
   SessionShortcutAlias,
 } from "./gateway-session";
+import type { GatewayDaemonContext } from "./gateway-daemon";
+import type { GatewaySkillsContext } from "./gateway-skills";
+import type { GatewayChannelsContext } from "./gateway-channels";
+import type { GatewayToolDefinitionView } from "./gateway-tools";
 
 export type CommandAction =
   | { kind: "display" }
   | { kind: "submit"; message: string }
+  | { kind: "start_swarm"; objective: string; executionMode?: SwarmExecutionMode }
+  | { kind: "cancel_swarm"; runId: string }
+  | { kind: "resume_swarm"; runId: string }
+  | { kind: "retry_swarm_stage"; runId: string; stage: SwarmStage }
   | { kind: "show_artifact"; filepath: string }
   | { kind: "show_artifact_catalog"; sessionId: string; latest?: boolean }
   | { kind: "set_budget"; maxUsd: number }
   | { kind: "set_provider"; provider: string; model?: string }
+  | { kind: "set_memory_truth_mode"; mode: MemoryTruthMode | null }
+  | { kind: "register_external_channel_adapter"; channelId: string }
+  | { kind: "setup_external_channel_webhook"; channelId: string }
+  | { kind: "setup_external_channel_subscription"; channelId: string }
   | { kind: "cancel_run" }
   | { kind: "clear_session" }
   | { kind: "compact"; strategy: CompactionStrategy }
@@ -67,30 +90,8 @@ export interface SlashCommandContext {
     summarizedMessageCount?: number;
     summaryLineCount?: number;
   } | null;
-  recentCompactions?: Array<{
-    strategy?: string;
-    trigger?: string;
-    timestamp?: number;
-    durationMs?: number;
-    compacted?: boolean;
-    originalCount?: number;
-    finalCount?: number;
-    tokensSavedEstimate?: number;
-    summaryLineCount?: number;
-    summarizedMessageCount?: number;
-    failureMessage?: string;
-  }>;
-  latestCompactionHandoff?: {
-    status?: string;
-    strategy?: string;
-    trigger?: string;
-    timestamp?: number;
-    loggedCount?: number;
-    structuredCount?: number;
-    artifactId?: string;
-    artifactChars?: number;
-    errorMessage?: string;
-  } | null;
+  recentCompactions?: Array<Partial<RuntimeCompactionEventSnapshot>>;
+  latestCompactionHandoff?: Partial<RuntimeCompactionHandoffSnapshot> | null;
   permissions?: {
     caste?: string;
     allowed?: string[];
@@ -98,6 +99,7 @@ export interface SlashCommandContext {
     active?: string[];
     sessionRules?: string[];
   };
+  toolDefinitions?: GatewayToolDefinitionView[];
   approvals?: {
     pending?: boolean;
     sessionRuleCount?: number;
@@ -168,34 +170,13 @@ export interface SlashCommandContext {
     reason?: string;
     markers?: string[];
   } | null;
-  runtime?: {
-    provider?: string;
-    model?: string;
-    selectedProvider?: string;
-    selectedModel?: string;
-    providerDefaults?: Record<string, string>;
-    circuitState?: string;
-    activeRun?: boolean;
-    isThinking?: boolean;
-    pendingCompactionStrategy?: string | null;
-    availableProviders?: string[];
-    failover?: Record<string, string[]>;
-    providerHealth?: Record<string, {
-      state?: string;
-      failureCount?: number;
-    }>;
-    recentFailovers?: Array<{
-      fromProvider?: string;
-      fromModel?: string;
-      toProvider?: string;
-      toModel?: string;
-      errorType?: string;
-      errorMessage?: string;
-      timestamp?: number;
-    }>;
-    startupErrors?: number;
-    startupWarnings?: number;
+  runtime?: Partial<RuntimeContextSnapshot> | null;
+  swarm?: {
+    runs?: SwarmRunSnapshot[];
   } | null;
+  daemon?: GatewayDaemonContext | null;
+  channels?: GatewayChannelsContext | null;
+  skills?: GatewaySkillsContext | null;
   [key: string]: unknown;
 }
 

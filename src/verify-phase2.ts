@@ -27,6 +27,7 @@ import {
   PermissionBehavior,
   PermissionReasonSource,
 } from "./security/permission-decision";
+import { listMethodCastes } from "./caste/enums";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -344,18 +345,28 @@ function verifyCasteProfiles(): void {
   const checker = new ToolPermissionChecker();
   const defaults = checker.getCasteDefaults();
 
-  const castes = [
+  const legacyCastes = [
     "root_queen", "eldest_architect", "assist_ant",
     "shield_generals", "watcher_swarm", "forge_carvers",
     "core_shapers", "liaison_ants", "ledger_ants",
     "lore_burrow", "nameless_swarm",
   ];
 
-  for (const caste of castes) {
-    assert(caste in defaults, `Caste profile exists: ${caste}`);
+  for (const caste of legacyCastes) {
+    assert(caste in defaults, `Legacy caste profile exists: ${caste}`);
   }
 
-  assertEqual(Object.keys(defaults).length, 11, "Exactly 11 caste profiles");
+  const methodCastes = listMethodCastes();
+  for (const caste of methodCastes) {
+    assert(caste in defaults, `Method caste profile exists: ${caste}`);
+  }
+
+  const expectedUniqueProfiles = new Set([...legacyCastes, ...methodCastes]).size;
+  assertEqual(
+    Object.keys(defaults).length,
+    expectedUniqueProfiles,
+    "Exactly legacy aliases plus method caste profiles",
+  );
 }
 
 // ---------------------------------------------------------------------------

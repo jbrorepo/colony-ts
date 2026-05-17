@@ -18,13 +18,35 @@ import type {
   CompactionStrategy,
   ContextWindowSnapshot,
 } from "../runtime/compaction";
+import type {
+  RuntimeCompactionHandoffSnapshot,
+  RuntimeFailoverSnapshot,
+  RuntimeHookEventSnapshot,
+  RuntimeProviderHealthSnapshot,
+} from "../runtime/runtime-snapshot";
 import type { PersistedSessionSummary } from "../runtime/session-recovery";
-import type { StartupReport } from "../runtime/startup-diagnostics";
+import {
+  buildLiveCurrentHistoryHint,
+  buildLiveCurrentResumeHint,
+  buildLiveSessionShortcutSnapshot,
+  buildPersistedSessionHistoryHint,
+  buildPersistedSessionResumeHint,
+} from "../runtime/session-shortcuts";
+import {
+  memoryTruthModeLabel,
+  type MemoryTruthMode,
+} from "../memory/hybrid-memory";
+import {
+  startupDoctorFocusCommand,
+  startupDoctorInspectCommands,
+  type StartupReport,
+} from "../runtime/startup-diagnostics";
 import {
   parsePersistedToolResultMessage,
   type PersistedToolResult,
 } from "../runtime/tool-result-storage";
 import type { WorkspaceInfo } from "../runtime/workspace";
+import { casteDisplayName, normalizeCasteKey, tryResolveMethodCaste } from "../caste/enums";
 import { SESSION_NAV_LABEL } from "./hotkeys";
 
 // ---------------------------------------------------------------------------
@@ -45,7 +67,8 @@ const COLORS = {
 } as const;
 
 function normalizeCaste(caste: string): string {
-  return caste.toLowerCase().replace(/\s+/g, "_");
+  const methodCaste = tryResolveMethodCaste(caste);
+  return methodCaste ?? normalizeCasteKey(caste);
 }
 
 function isProviderIssueText(value: string): boolean {
@@ -74,11 +97,15 @@ function formatProviderFailoverFace(event: {
 }
 
 export function formatCasteDisplay(caste: string): string {
-  return normalizeCaste(caste)
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  try {
+    return casteDisplayName(caste);
+  } catch {
+    return normalizeCaste(caste)
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,12 +222,41 @@ interface LogEntryProps {
   message: LogMessage;
 }
 
+export interface TranscriptDisplaySummary {
+  preview: string;
+  truncated: boolean;
+  hiddenChars: number;
+}
+
+export function summarizeTranscriptDisplayText(
+  text: string,
+  maxChars = 4_000,
+  maxLines = 48,
+): TranscriptDisplaySummary {
+  const normalized = String(text ?? "").replace(/\r\n/g, "\n");
+  const lineLimited = normalized
+    .split("\n")
+    .slice(0, maxLines)
+    .join("\n");
+  const preview = lineLimited.length > maxChars
+    ? lineLimited.slice(0, maxChars)
+    : lineLimited;
+  const hiddenChars = Math.max(0, normalized.length - preview.length);
+
+  return {
+    preview,
+    truncated: hiddenChars > 0,
+    hiddenChars,
+  };
+}
+
 export const LogEntry = React.memo(function LogEntry({ message }: LogEntryProps) {
   const externalizedResult =
     message.externalizedResult
     ?? ((message.role === "tool" || message.role === "error")
       ? parsePersistedToolResultMessage(message.content)
       : null);
+  const contentPreview = summarizeTranscriptDisplayText(message.content);
 
   if (
     (message.role === "tool" || message.role === "error" || message.role === "system")
@@ -234,13 +290,20 @@ export const LogEntry = React.memo(function LogEntry({ message }: LogEntryProps)
         : "";
 
   return (
-    <Box>
-      <Text color={color}>
-        {prefix} {label ? `${label} ` : ""}
-      </Text>
-      <Text color={color} wrap="wrap">
-        {message.content}
-      </Text>
+    <Box flexDirection="column">
+      <Box>
+        <Text color={color}>
+          {prefix} {label ? `${label} ` : ""}
+        </Text>
+        <Text color={color} wrap="wrap">
+          {contentPreview.preview}
+        </Text>
+      </Box>
+      {contentPreview.truncated && (
+        <Text color={COLORS.muted}>
+          ... {contentPreview.hiddenChars.toLocaleString()} more chars hidden in face | transcript truth kept
+        </Text>
+      )}
     </Box>
   );
 });
@@ -363,9 +426,12 @@ export const LogPane = React.memo(function LogPane({
 
 interface StatusBarProps {
   activeRun: boolean;
+  interruptRequested?: boolean;
   isThinking: boolean;
   thinkingLabel: string;
   activeHistoryHint?: string;
+  queuedPromptCount?: number;
+  queuedPromptPreview?: string | null;
   pendingApprovalTool?: string | null;
   loopDetected: boolean;
   loopTool?: string;
@@ -374,10 +440,12 @@ interface StatusBarProps {
   model: string;
   selectedProvider: string;
   selectedModel: string;
+  memoryTruthModeOverride?: MemoryTruthMode | null;
   toolCount: number;
   pendingCompactionStrategy?: CompactionStrategy | null;
   startupErrors?: number;
   startupWarnings?: number;
+  startupInspectCommand?: string | null;
   recentFailoverCount?: number;
   recentHookCount?: number;
   sessionCatalogCount?: number;
@@ -386,9 +454,12 @@ interface StatusBarProps {
 
 export const StatusBar = React.memo(function StatusBar({
   activeRun,
+  interruptRequested = false,
   isThinking,
   thinkingLabel,
   activeHistoryHint = "/history current 8",
+  queuedPromptCount = 0,
+  queuedPromptPreview = null,
   pendingApprovalTool = null,
   loopDetected,
   loopTool,
@@ -397,10 +468,12 @@ export const StatusBar = React.memo(function StatusBar({
   model,
   selectedProvider,
   selectedModel,
+  memoryTruthModeOverride = null,
   toolCount,
   pendingCompactionStrategy = null,
   startupErrors = 0,
   startupWarnings = 0,
+  startupInspectCommand = null,
   recentFailoverCount = 0,
   recentHookCount = 0,
   sessionCatalogCount = 0,
@@ -426,9 +499,9 @@ export const StatusBar = React.memo(function StatusBar({
         : COLORS.success;
   const doctorLabel =
     startupErrors > 0
-      ? `doctor:E${startupErrors}/W${startupWarnings} /doctor`
+      ? `doctor:E${startupErrors}/W${startupWarnings} ${startupInspectCommand ?? "/doctor"}`
       : startupWarnings > 0
-        ? `doctor:W${startupWarnings} /doctor`
+        ? `doctor:W${startupWarnings} ${startupInspectCommand ?? "/doctor"}`
         : "doctor:ok";
   const pendingSelection =
     selectedProvider !== provider
@@ -437,6 +510,7 @@ export const StatusBar = React.memo(function StatusBar({
     toolCount > 0
       ? `${toolCount} active tools /tools`
       : "0 active tools";
+  const memoryLabel = memoryTruthModeLabel(memoryTruthModeOverride);
 
   return (
     <Box
@@ -448,10 +522,12 @@ export const StatusBar = React.memo(function StatusBar({
       <Box>
         {pendingApprovalTool ? (
           <Text color={COLORS.warning}>Approval: {pendingApprovalTool} pending (y/n/a/s/esc | /tools)</Text>
+        ) : interruptRequested ? (
+          <Text color={COLORS.warning}>Stopping current run...{queuedPromptCount > 0 ? ` | next:${queuedPromptPreview ?? "queued prompt"}` : ""} | /status /cost | {activeHistoryHint}</Text>
         ) : isThinking ? (
-          <Text color={COLORS.warning}>... {thinkingLabel} | /cancel /status /cost | {activeHistoryHint}</Text>
+          <Text color={COLORS.warning}>... {thinkingLabel}{queuedPromptCount > 0 ? ` | next:${queuedPromptPreview ?? "queued prompt"}` : ""} | /cancel /status /cost | {activeHistoryHint}</Text>
         ) : activeRun ? (
-          <Text color={COLORS.warning}>Run active | /cancel /status /cost | {activeHistoryHint}</Text>
+          <Text color={COLORS.warning}>Run active{queuedPromptCount > 0 ? ` | next:${queuedPromptPreview ?? "queued prompt"}` : ""} | /cancel /status /cost | {activeHistoryHint}</Text>
         ) : (
           <Text color={COLORS.success}>Ready</Text>
         )}
@@ -472,6 +548,8 @@ export const StatusBar = React.memo(function StatusBar({
             <Text color={COLORS.muted}> | </Text>
           </>
         )}
+        <Text color={COLORS.accent}>memory:{memoryLabel} /memory</Text>
+        <Text color={COLORS.muted}> | </Text>
         <Text color={circuitColor}>{provider}:{circuitLabel}</Text>
         <Text color={COLORS.muted}> | </Text>
         {pendingCompactionStrategy && (
@@ -498,6 +576,12 @@ export const StatusBar = React.memo(function StatusBar({
             {interruptedSessionCount > 0 && (
               <Text color={COLORS.warning}> ({interruptedSessionCount} pending)</Text>
             )}
+            <Text color={COLORS.muted}> | </Text>
+          </>
+        )}
+        {queuedPromptCount > 0 && (
+          <>
+            <Text color={COLORS.warning}>queue:{queuedPromptCount}</Text>
             <Text color={COLORS.muted}> | </Text>
           </>
         )}
@@ -622,38 +706,16 @@ interface BudgetWidgetProps {
   lastCompaction?: CompactionResult | null;
   workspaceInfo?: WorkspaceInfo | null;
   startupReport?: StartupReport | null;
-  providerHealth?: Record<string, { state?: string; failureCount?: number }>;
-  recentFailovers?: Array<{
-    fromProvider: string;
-    fromModel: string;
-    toProvider: string;
-    toModel: string;
-    errorType: string;
-    errorMessage: string;
-    timestamp: number;
-  }>;
-  recentHookEvents?: Array<{
-    kind: string;
-    detail?: string;
-    timestamp: number;
-    durationMs?: number;
-  }>;
-  latestCompactionHandoff?: {
-    status: "ok" | "failed";
-    strategy: CompactionStrategy;
-    trigger: string;
-    timestamp: number;
-    loggedCount: number;
-    structuredCount: number;
-    artifactId?: string;
-    artifactChars?: number;
-    errorMessage?: string;
-  } | null;
+  providerHealth?: Record<string, RuntimeProviderHealthSnapshot>;
+  recentFailovers?: RuntimeFailoverSnapshot[];
+  recentHookEvents?: RuntimeHookEventSnapshot[];
+  latestCompactionHandoff?: RuntimeCompactionHandoffSnapshot | null;
   persistedSessions?: PersistedSessionSummary[];
   provider: string;
   model: string;
   selectedProvider: string;
   selectedModel: string;
+  memoryTruthModeOverride?: MemoryTruthMode | null;
   currentSessionId?: string;
   currentAgentId?: string;
   currentCaste?: string;
@@ -695,6 +757,7 @@ export const BudgetWidget = React.memo(function BudgetWidget({
   model,
   selectedProvider,
   selectedModel,
+  memoryTruthModeOverride = null,
   currentSessionId = "",
   currentAgentId = "unknown",
   currentCaste = "unknown",
@@ -730,6 +793,12 @@ export const BudgetWidget = React.memo(function BudgetWidget({
   const tokenColor = tokenPct > 85 ? "red" : tokenPct > 60 ? "yellow" : "green";
   const costColor = costPct > 85 ? "red" : costPct > 60 ? "yellow" : "green";
   const startupIssues = (startupReport?.checks ?? []).filter((check) => !check.passed).slice(0, 2);
+  const startupFocusCommand = startupDoctorFocusCommand(startupReport ?? null);
+  const startupInspectLine = startupDoctorInspectCommands(startupReport ?? null, {
+    includeGeneral: true,
+    includeSeverity: true,
+    includeFirstRun: true,
+  }).join(" | ");
   const providerIssueCount = (startupReport?.checks ?? []).filter((check) => {
     if (check.passed) return false;
     const haystack = [check.name, check.message, check.fix]
@@ -779,17 +848,14 @@ export const BudgetWidget = React.memo(function BudgetWidget({
   const pendingProviderSelection =
     selectedProvider !== provider
     || selectedModel !== model;
-  const currentOwnsLatestAlias = React.useMemo(() => {
-    if (!currentSessionId || !Number.isFinite(currentLatestMessageTimestamp)) return false;
-    const latestPersisted = persistedSessions[0];
-    if (!latestPersisted) return false;
-    if (String(latestPersisted.sessionId ?? "") === currentSessionId) return false;
-    const latestPersistedTime = Date.parse(
-      String(latestPersisted.lastMessageAt ?? latestPersisted.savedAt ?? ""),
-    );
-    if (!Number.isFinite(latestPersistedTime)) return true;
-    return Number(currentLatestMessageTimestamp) > latestPersistedTime;
-  }, [currentLatestMessageTimestamp, currentSessionId, persistedSessions]);
+  const memoryLabel = memoryTruthModeLabel(memoryTruthModeOverride);
+  const liveSessionShortcuts = React.useMemo(() => buildLiveSessionShortcutSnapshot({
+    currentSessionId,
+    currentMessageCount,
+    currentLatestMessageTimestamp,
+    currentAwaitingReply,
+    persistedSessions,
+  }), [currentAwaitingReply, currentLatestMessageTimestamp, currentMessageCount, currentSessionId, persistedSessions]);
   const hasUnsavedCurrentSession = Boolean(
     currentSessionId
     && currentMessageCount > 0
@@ -807,9 +873,10 @@ export const BudgetWidget = React.memo(function BudgetWidget({
             : currentPreviewRole === "error"
               ? "!"
               : "m";
+  const currentSessionPreview = summarizeTranscriptDisplayText(currentPreviewText, 240, 3);
   const currentLiveState = [
     currentAwaitingReply ? "awaiting reply" : "unsaved current",
-    currentOwnsLatestAlias ? "latest live" : null,
+    liveSessionShortcuts.currentOwnsLatestHistoryAlias ? "latest live" : null,
   ].filter(Boolean).join(" | ");
   const currentStartedLabel = Number.isFinite(currentStartedMessageTimestamp)
     ? new Date(Number(currentStartedMessageTimestamp)).toISOString()
@@ -858,22 +925,8 @@ export const BudgetWidget = React.memo(function BudgetWidget({
     ? `Scripts: ${workspaceInfo.scriptNames.slice(0, 4).join(", ")}`
     : null;
   const sessionEntries = persistedSessions.slice(0, 3);
-  const newestInterruptedIndex = persistedSessions.findIndex((session) => session.interruption !== "none");
-  const currentPendingAlias = currentAwaitingReply && newestInterruptedIndex === -1;
-  const currentResumeHint = [
-    currentOwnsLatestAlias ? "/resume latest" : null,
-    currentPendingAlias ? "/resume pending" : null,
-    currentSessionId ? `/resume ${currentSessionId}` : null,
-    "/status",
-    "/cost",
-    "/clear",
-  ].filter(Boolean).join(" | ");
-  const currentHistoryHint = [
-    "/history current 8",
-    currentOwnsLatestAlias ? "/history latest 8" : null,
-    currentPendingAlias ? "/history pending 8" : null,
-    currentSessionId ? `/history ${currentSessionId} 8` : null,
-  ].filter(Boolean).join(" | ");
+  const currentResumeHint = buildLiveCurrentResumeHint(liveSessionShortcuts);
+  const currentHistoryHint = buildLiveCurrentHistoryHint(liveSessionShortcuts, 8);
   const compactionRecommendationLabel = compactionRecommendationStrategy
     ? `Compaction next: /compact smart -> ${compactionRecommendationStrategy}`
     : "Compaction next: hold";
@@ -1097,9 +1150,16 @@ export const BudgetWidget = React.memo(function BudgetWidget({
           </Box>
         ))}
         {startupReport && (startupReport.errorCount > 0 || startupReport.warningCount > 0) && (
-          <Text color={COLORS.muted}>
-            Inspect: /doctor | /doctor errors | /doctor warnings | /doctor workspace | /doctor config | /doctor data | /doctor terminal | /doctor local | /doctor cloud | /doctor providers | /doctor failovers | /doctor first-run
-          </Text>
+          <>
+            {startupFocusCommand && (
+              <Text color={COLORS.muted} wrap="truncate">
+                Focus: {startupFocusCommand} | /doctor first-run
+              </Text>
+            )}
+            <Text color={COLORS.muted}>
+              Inspect: {startupInspectLine} | /doctor workspace | /doctor config | /doctor data | /doctor terminal | /doctor local | /doctor cloud | /doctor providers | /doctor failovers
+            </Text>
+          </>
         )}
         {latestFailover && (
           <Text color={COLORS.muted} wrap="truncate">
@@ -1149,6 +1209,7 @@ export const BudgetWidget = React.memo(function BudgetWidget({
         ) : (
           <Text color={COLORS.muted}>LLM next: same as current</Text>
         )}
+        <Text color={COLORS.muted}>Memory: {memoryLabel} | /memory</Text>
         <Text color={COLORS.muted}>Inspect: /provider | /provider {provider} | /provider perf {provider} | /provider failovers {provider} | /model | /status</Text>
       </Box>
 
@@ -1209,9 +1270,16 @@ export const BudgetWidget = React.memo(function BudgetWidget({
                 cost ${costUsd.toFixed(4)} | tokens {tokensUsed.toLocaleString()}
               </Text>
               {currentPreviewText && (
-                <Text color={COLORS.muted} wrap="truncate">
-                  {currentPreviewPrefix}: {currentPreviewText}
-                </Text>
+                <Box flexDirection="column">
+                  <Text color={COLORS.muted} wrap="truncate">
+                    {currentPreviewPrefix}: {currentSessionPreview.preview}
+                  </Text>
+                  {currentSessionPreview.truncated && (
+                    <Text color={COLORS.muted} wrap="truncate">
+                      ... {currentSessionPreview.hiddenChars.toLocaleString()} more chars hidden in face | transcript truth kept
+                    </Text>
+                  )}
+                </Box>
               )}
               <Text color={COLORS.muted}>
                 use {currentResumeHint}
@@ -1229,26 +1297,19 @@ export const BudgetWidget = React.memo(function BudgetWidget({
                 ? COLORS.muted
                 : COLORS.warning;
             const sessionCatalogIndex = index + 1;
-            const historyCommand = `/history ${sessionCatalogIndex}`;
-            const resumeCommand = `/resume ${sessionCatalogIndex}`;
-            const pendingTarget = newestInterruptedIndex === index && session.interruption !== "none";
-            const latestTarget = index === 0 && !currentOwnsLatestAlias;
-            const resumeHint = currentTarget
-              ? `/resume ${session.sessionId} | /status | /cost | /clear`
-              : pendingTarget
-                ? latestTarget
-                  ? `/resume pending | /resume latest | ${resumeCommand} | /resume ${session.sessionId}`
-                  : `/resume pending | ${resumeCommand} | /resume ${session.sessionId}`
-                : latestTarget
-                  ? `/resume latest | ${resumeCommand} | /resume ${session.sessionId}`
-                  : `${resumeCommand} | /resume ${session.sessionId}`;
-            const historyHint = currentTarget
-              ? `/history current 8 | /history ${session.sessionId} 8`
-              : pendingTarget
-                ? latestTarget
-                  ? `/history pending 8 | /history latest 8 | ${historyCommand} 8 | /history ${session.sessionId} 8`
-                  : `/history pending 8 | ${historyCommand} 8 | /history ${session.sessionId} 8`
-                : `${historyCommand} 8 | /history ${session.sessionId} 8`;
+            const resumeHint = buildPersistedSessionResumeHint({
+              sessionId: session.sessionId,
+              sessionCatalogIndex,
+              currentTarget: Boolean(currentTarget),
+              snapshot: liveSessionShortcuts,
+            });
+            const historyHint = buildPersistedSessionHistoryHint({
+              sessionId: session.sessionId,
+              sessionCatalogIndex,
+              currentTarget: Boolean(currentTarget),
+              snapshot: liveSessionShortcuts,
+              count: 8,
+            });
             const previewPrefix =
               session.previewRole === "assistant"
                 ? "a"
@@ -1257,6 +1318,7 @@ export const BudgetWidget = React.memo(function BudgetWidget({
                   : session.previewRole === "tool"
                     ? "t"
                     : "m";
+            const savedSessionPreview = summarizeTranscriptDisplayText(session.previewText ?? "", 240, 3);
             return (
               <Box key={session.sessionId} flexDirection="column">
                 <Text color={COLORS.muted}>
@@ -1280,9 +1342,16 @@ export const BudgetWidget = React.memo(function BudgetWidget({
                   cost ${session.costUsd.toFixed(4)} | tokens {session.tokensUsed.toLocaleString()}
                 </Text>
                 {session.previewText && (
-                  <Text color={COLORS.muted} wrap="truncate">
-                    {previewPrefix}: {session.previewText}
-                  </Text>
+                  <Box flexDirection="column">
+                    <Text color={COLORS.muted} wrap="truncate">
+                      {previewPrefix}: {savedSessionPreview.preview}
+                    </Text>
+                    {savedSessionPreview.truncated && (
+                      <Text color={COLORS.muted} wrap="truncate">
+                        ... {savedSessionPreview.hiddenChars.toLocaleString()} more chars hidden in face | transcript truth kept
+                      </Text>
+                    )}
+                  </Box>
                 )}
                 <Text color={COLORS.muted}>
                   use {resumeHint}
@@ -1304,6 +1373,17 @@ export const BudgetWidget = React.memo(function BudgetWidget({
 // ---------------------------------------------------------------------------
 
 const CASTE_COLORS: Record<string, string> = {
+  queen: "magenta",
+  eldest: "blue",
+  vigil_ant: "red",
+  consult_ant: "yellow",
+  develop_ant: "green",
+  logist_ant: "blue",
+  inform_ant: "cyan",
+  account_ant: "yellow",
+  cogniz_ant: "cyan",
+  command_ant: "blue",
+  oper_ant: "gray",
   root_queen: "magenta",
   eldest_architect: "blue",
   shield_generals: "red",
@@ -1314,6 +1394,17 @@ const CASTE_COLORS: Record<string, string> = {
 };
 
 const CASTE_ICONS: Record<string, string> = {
+  queen: "queen",
+  eldest: "eldest",
+  vigil_ant: "vigil",
+  consult_ant: "consult",
+  develop_ant: "develop",
+  logist_ant: "logist",
+  inform_ant: "inform",
+  account_ant: "account",
+  cogniz_ant: "cogniz",
+  command_ant: "command",
+  oper_ant: "oper",
   root_queen: "queen",
   eldest_architect: "arch",
   shield_generals: "shield",
@@ -1600,6 +1691,7 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({
   const structuredError = approvalMessage || deniedResult || !error
     ? null
     : summarizeBuiltinToolError(toolName, error);
+  const errorPreview = error ? summarizeTranscriptDisplayText(error, 600, 8) : null;
   const argsStr = Object.entries(args)
     .map(([key, value]) => {
       const valueStr = String(value);
@@ -1719,8 +1811,15 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({
             </Text>
           ))}
         </>
-      ) : error ? (
-        <Text color={COLORS.error}>x {error}</Text>
+      ) : errorPreview ? (
+        <>
+          <Text color={COLORS.error}>x {errorPreview.preview}</Text>
+          {errorPreview.truncated && (
+            <Text color={COLORS.muted}>
+              ... {errorPreview.hiddenChars.toLocaleString()} more chars hidden in face | transcript truth kept
+            </Text>
+          )}
+        </>
       ) : structuredOutcome ? (
         <>
           <Text color={structuredOutcome.headlineColor ?? COLORS.muted}>
@@ -1745,7 +1844,14 @@ export const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({
 // WelcomeBanner
 // ---------------------------------------------------------------------------
 
-export const WelcomeBanner = React.memo(function WelcomeBanner({ caste }: { caste?: string }) {
+export const WelcomeBanner = React.memo(function WelcomeBanner({
+  caste,
+  memoryTruthModeOverride = null,
+}: {
+  caste?: string;
+  memoryTruthModeOverride?: MemoryTruthMode | null;
+}) {
+  const memoryLabel = memoryTruthModeLabel(memoryTruthModeOverride);
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
       <Text color={COLORS.brand} bold>
@@ -1769,7 +1875,10 @@ export const WelcomeBanner = React.memo(function WelcomeBanner({ caste }: { cast
         Session views: /sessions pending|current | /history latest|pending|current | /resume latest|pending
       </Text>
       <Text color={COLORS.accent}>
-        Runtime: /doctor, /provider, /model, /perf, /permissions, /tools, /hooks, /events, /events perf, /budget, /compact smart, /cancel
+Runtime: /doctor, /provider, /model, /memory, /workflow, /perf, /permissions, /tools, /hooks, /events, /events perf, /budget, /compact smart, /cancel
+      </Text>
+      <Text color={COLORS.muted}>
+        Memory recall: {memoryLabel} | /memory auto|exact|derived|balanced|prefer-exact|prefer-derived
       </Text>
       <Text color={COLORS.muted}>
         Policy views: /permissions active|allowed|denied|rules | /tools approvals|recent|artifacts|perf

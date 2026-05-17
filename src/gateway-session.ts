@@ -5,6 +5,10 @@ import {
   type SessionHistoryExcerpt,
 } from "./runtime/session-recovery";
 import {
+  buildLiveCurrentHistoryHint,
+  buildLiveSessionShortcutSnapshot,
+} from "./runtime/session-shortcuts";
+import {
   historyTimestampBoundary,
   readString,
 } from "./gateway-shared";
@@ -246,6 +250,39 @@ export function currentSessionHistoryExcerpt(
   );
 }
 
+function buildGatewayLiveSessionShortcutSnapshot(
+  excerpt: SessionHistoryExcerpt,
+  sessions: GatewaySessionRecord[],
+) {
+  return buildLiveSessionShortcutSnapshot({
+    currentSessionId: excerpt.sessionId,
+    currentMessageCount: excerpt.totalMessages,
+    currentLatestMessageTimestamp: Number.isFinite(Date.parse(String(excerpt.lastMessageAt ?? "")))
+      ? Date.parse(String(excerpt.lastMessageAt ?? ""))
+      : null,
+    currentAwaitingReply: excerpt.entries.at(-1)?.role === "user",
+    persistedSessions: sessions.map((session) => ({
+      sessionId: String(session.sessionId ?? ""),
+      agentId: String(session.agentId ?? "unknown"),
+      caste: String(session.caste ?? "unknown"),
+      provider: session.provider,
+      model: session.model,
+      savedAt: String(session.savedAt ?? session.lastMessageAt ?? "unknown"),
+      lastMessageAt: String(session.lastMessageAt ?? session.savedAt ?? "unknown"),
+      messageCount: Number(session.messageCount ?? 0),
+      tokensUsed: Number(session.tokensUsed ?? 0),
+      costUsd: Number(session.costUsd ?? 0),
+      interruption:
+        session.interruption === "interrupted_prompt" || session.interruption === "interrupted_turn"
+          ? session.interruption
+          : "none",
+      hasCheckpoint: Boolean(session.hasCheckpoint),
+      previewText: String(session.previewText ?? ""),
+      previewRole: String(session.previewRole ?? ""),
+    })),
+  });
+}
+
 export function latestCurrentSessionExcerpt(
   session: unknown,
   sessions: GatewaySessionRecord[],
@@ -253,40 +290,24 @@ export function latestCurrentSessionExcerpt(
 ): SessionHistoryExcerpt | null {
   const excerpt = currentSessionHistoryExcerpt(session, count);
   if (!excerpt) return null;
-  if (sessions.length === 0) return excerpt;
-
-  const latestPersisted = sessions[0];
-  const latestPersistedId =
-    latestPersisted?.sessionId != null ? String(latestPersisted.sessionId) : "";
-  if (latestPersistedId && excerpt.sessionId === latestPersistedId) {
-    return excerpt;
-  }
-
-  const currentTime = Date.parse(String(excerpt.lastMessageAt ?? ""));
-  const latestPersistedTime = Date.parse(
-    String(latestPersisted?.lastMessageAt ?? latestPersisted?.savedAt ?? ""),
-  );
-  if (Number.isFinite(currentTime) && !Number.isFinite(latestPersistedTime)) {
-    return excerpt;
-  }
-  if (Number.isFinite(currentTime) && Number.isFinite(latestPersistedTime) && currentTime > latestPersistedTime) {
-    return excerpt;
-  }
-
-  return null;
+  return buildGatewayLiveSessionShortcutSnapshot(excerpt, sessions).currentOwnsLatestHistoryAlias
+    ? excerpt
+    : null;
 }
 
 export function effectiveLatestPersistedAliasSessionId(
   session: unknown,
   sessions: GatewaySessionRecord[],
 ): string | null {
-  const latestPersistedId = sessions[0]?.sessionId != null ? String(sessions[0].sessionId) : null;
-  if (!latestPersistedId) return null;
-  const currentLatestExcerpt = latestCurrentSessionExcerpt(session, sessions, 1);
-  if (currentLatestExcerpt && currentLatestExcerpt.sessionId !== latestPersistedId) {
-    return null;
+  const excerpt = currentSessionHistoryExcerpt(session, 1);
+  if (!excerpt) {
+    return sessions[0]?.sessionId != null ? String(sessions[0].sessionId) : null;
   }
-  return latestPersistedId;
+  const shortcutSnapshot = buildGatewayLiveSessionShortcutSnapshot(excerpt, sessions);
+  return shortcutSnapshot.currentOwnsLatestHistoryAlias
+    && shortcutSnapshot.latestPersistedSessionId !== excerpt.sessionId
+    ? null
+    : shortcutSnapshot.latestPersistedSessionId;
 }
 
 export function currentSessionShortcutAliases(
@@ -295,24 +316,13 @@ export function currentSessionShortcutAliases(
 ): SessionShortcutAlias[] {
   const excerpt = currentSessionHistoryExcerpt(session, 1);
   if (!excerpt) return [];
-
-  const currentSessionId = excerpt.sessionId;
-  const newestInterruptedSessionId = sessions.find((item) => String(item.interruption ?? "none") !== "none")?.sessionId ?? null;
-  const latestPersistedId = sessions[0]?.sessionId != null ? String(sessions[0].sessionId) : null;
-  const latestCurrentExcerpt = latestCurrentSessionExcerpt(session, sessions, 1);
   const aliases: SessionShortcutAlias[] = [];
+  const shortcutSnapshot = buildGatewayLiveSessionShortcutSnapshot(excerpt, sessions);
 
-  if (
-    excerpt.interruption !== "none"
-    && (newestInterruptedSessionId === null || String(newestInterruptedSessionId) === currentSessionId)
-  ) {
+  if (shortcutSnapshot.currentOwnsPendingHistoryAlias) {
     aliases.push("pending");
   }
-  if (
-    sessions.length === 0
-    || latestPersistedId === currentSessionId
-    || latestCurrentExcerpt?.sessionId === currentSessionId
-  ) {
+  if (shortcutSnapshot.currentOwnsLatestHistoryAlias) {
     aliases.push("latest");
   }
 
@@ -327,12 +337,10 @@ export function currentSessionHistoryCommands(
   if (!excerpt) {
     return [];
   }
-
-  return [
-    "/history current 8",
-    ...currentSessionShortcutAliases(session, sessions).map((alias) => `/history ${alias} 8`),
-    `/history ${excerpt.sessionId} 8`,
-  ];
+  return buildLiveCurrentHistoryHint(
+    buildGatewayLiveSessionShortcutSnapshot(excerpt, sessions),
+    8,
+  ).split(" | ");
 }
 
 export function resolveResumeTarget(

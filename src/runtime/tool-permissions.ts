@@ -10,6 +10,7 @@
  */
 
 import { normalize, basename, extname, isAbsolute } from "path";
+import { MethodCaste, resolveMethodCaste, normalizeCasteKey } from "../caste/enums";
 import {
   PermissionBehavior,
   PermissionReasonSource,
@@ -171,6 +172,7 @@ function getCasteDefaults(): Record<string, ToolPermissions> {
     assist_ant: defaultToolPermissions({
       caste: "assist_ant",
       denylist: ["shell_exec"],
+      shellPolicy: { ...defaultShellPolicy(), allowedCommands: ["__no_shell__"] },
     }),
 
     // Shield Generals — security caste, broader shell access
@@ -238,6 +240,76 @@ function getCasteDefaults(): Record<string, ToolPermissions> {
       httpPolicy: { ...defaultHttpPolicy(), allowedDomains: [] },
       filePolicy: { ...defaultFilePolicy(), allowedPaths: ["data/*", "temp/*"] },
     }),
+
+    // 12-caste method framework compatibility defaults.
+    [MethodCaste.QUEEN]: defaultToolPermissions({
+      caste: MethodCaste.QUEEN,
+      shellPolicy: { ...defaultShellPolicy(), blockedCommands: [], blockedPatterns: [] },
+      httpPolicy: { ...defaultHttpPolicy(), blockedDomains: [] },
+      filePolicy: { ...defaultFilePolicy(), blockedPaths: [], blockedExtensions: [] },
+    }),
+    [MethodCaste.ELDEST]: defaultToolPermissions({ caste: MethodCaste.ELDEST }),
+    [MethodCaste.COMMAND_ANT]: defaultToolPermissions({
+      caste: MethodCaste.COMMAND_ANT,
+      denylist: ["shell_exec"],
+      shellPolicy: { ...defaultShellPolicy(), allowedCommands: ["__no_shell__"] },
+      httpPolicy: { ...defaultHttpPolicy(), allowedDomains: [] },
+      filePolicy: {
+        ...defaultFilePolicy(),
+        allowedExtensions: [".md", ".txt", ".json"],
+      },
+    }),
+    [MethodCaste.VIGIL_ANT]: defaultToolPermissions({
+      caste: MethodCaste.VIGIL_ANT,
+      shellPolicy: {
+        ...defaultShellPolicy(),
+        blockedCommands: ["sudo", "su", "shutdown*", "reboot*"],
+      },
+      filePolicy: { ...defaultFilePolicy(), blockedPaths: [], blockedExtensions: [] },
+    }),
+    [MethodCaste.DEVELOP_ANT]: defaultToolPermissions({
+      caste: MethodCaste.DEVELOP_ANT,
+      filePolicy: { ...defaultFilePolicy(), blockedExtensions: [] },
+    }),
+    [MethodCaste.LOGIST_ANT]: defaultToolPermissions({ caste: MethodCaste.LOGIST_ANT }),
+    [MethodCaste.CONSULT_ANT]: defaultToolPermissions({
+      caste: MethodCaste.CONSULT_ANT,
+      shellPolicy: {
+        ...defaultShellPolicy(),
+        allowedCommands: ["bun", "node", "cat", "grep", "find", "ls", "head", "tail", "wc"],
+        blockedPatterns: [
+          ...defaultShellPolicy().blockedPatterns,
+          String.raw`^bun\s+run\s+(?!verify(?::|-)?)`,
+          String.raw`^bun\s+(?!run\s+verify(?::|-)?)`,
+        ],
+      },
+    }),
+    [MethodCaste.INFORM_ANT]: defaultToolPermissions({
+      caste: MethodCaste.INFORM_ANT,
+      denylist: ["shell_exec"],
+      shellPolicy: { ...defaultShellPolicy(), allowedCommands: ["__no_shell__"] },
+    }),
+    [MethodCaste.COGNIZ_ANT]: defaultToolPermissions({
+      caste: MethodCaste.COGNIZ_ANT,
+      shellPolicy: {
+        ...defaultShellPolicy(),
+        allowedCommands: ["cat", "grep", "find", "ls", "head", "tail", "wc"],
+      },
+    }),
+    [MethodCaste.ACCOUNT_ANT]: defaultToolPermissions({
+      caste: MethodCaste.ACCOUNT_ANT,
+      shellPolicy: {
+        ...defaultShellPolicy(),
+        allowedCommands: ["cat", "grep", "wc", "sort", "uniq", "awk", "sed", "head", "tail", "cut"],
+      },
+    }),
+    [MethodCaste.OPER_ANT]: defaultToolPermissions({
+      caste: MethodCaste.OPER_ANT,
+      denylist: ["shell_exec"],
+      shellPolicy: { ...defaultShellPolicy(), allowedCommands: ["__no_shell__"] },
+      httpPolicy: { ...defaultHttpPolicy(), allowedDomains: [] },
+      filePolicy: { ...defaultFilePolicy(), allowedPaths: ["data/*", "temp/*"] },
+    }),
   };
 }
 
@@ -283,7 +355,7 @@ export class ToolPermissionChecker {
   }
 
   setCastePermissions(caste: string, permissions: ToolPermissions): void {
-    const casteKey = caste.toLowerCase().replace(/ /g, "_");
+    const casteKey = normalizePermissionCasteKey(caste);
     this._castePermissions.set(casteKey, permissions);
   }
 
@@ -292,7 +364,7 @@ export class ToolPermissionChecker {
       return this._agentPermissions.get(agentId)!;
     }
     if (caste) {
-      const casteKey = caste.toLowerCase().replace(/ /g, "_");
+      const casteKey = normalizePermissionCasteKey(caste);
       if (this._castePermissions.has(casteKey)) {
         return this._castePermissions.get(casteKey)!;
       }
@@ -530,5 +602,13 @@ export class ToolPermissionChecker {
   reset(): void {
     this._agentPermissions.clear();
     this._castePermissions.clear();
+  }
+}
+
+function normalizePermissionCasteKey(caste: string): string {
+  try {
+    return resolveMethodCaste(caste);
+  } catch {
+    return normalizeCasteKey(caste);
   }
 }

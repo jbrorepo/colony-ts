@@ -23,12 +23,25 @@ import {
   ToolCallDisplay,
   summarizeBuiltinToolOutput,
   summarizeBuiltinToolError,
+  summarizeTranscriptDisplayText,
   ThinkingIndicator,
   LogEntry,
   formatCasteDisplay,
   type LogMessage,
 } from "./ui/components";
-import { appendMessageDelta, createLogMessage, useColonyStore } from "./ui/store";
+import {
+  appendMessageDelta,
+  createLogMessage,
+  sameCompactionFailure,
+  sameCompactionHandoff,
+  sameCompactionResult,
+  sameContextWindowSnapshot,
+  samePersistedSessionSummaries,
+  sameProviderDiagnostics,
+  sameStartupReport,
+  sameWorkspaceInfo,
+  useColonyStore,
+} from "./ui/store";
 import {
   listReadyCloudFallbackProviders,
   readableError,
@@ -47,8 +60,20 @@ import {
 import {
   formatStartupBlockMessage,
   formatStartupPlaceholder,
+  startupDoctorFocusCommand,
+  startupDoctorInspectCommands,
   type StartupReport,
 } from "./runtime/startup-diagnostics";
+import {
+  buildLiveCurrentHistoryHint,
+  buildLiveCurrentResumeHint,
+  buildLiveSessionShortcutSnapshot,
+  buildPersistedSessionHistoryHint,
+  buildPersistedSessionResumeHint,
+  resolveSmartHistoryCommand,
+  resolveSmartResumeCommand,
+} from "./runtime/session-shortcuts";
+import { createUserMessageQueue } from "./runtime/message-queue";
 import { Caste } from "./caste/enums";
 import type { LLMConfig } from "./llm/selector";
 
@@ -112,6 +137,9 @@ function verifyGateway(): void {
   assertEqual(sessions.type, "sessions", "/sessions: type");
   const history = parseCommand("/history latest 5");
   assertEqual(history.type, "history", "/history: type");
+  const artifactQuoted = parseCommand("/artifact \"C:/tmp/saved result.txt\"");
+  assertEqual(artifactQuoted.type, "artifact", "/artifact: type");
+  assertEqual(artifactQuoted.args[0], "C:/tmp/saved result.txt", "/artifact: quoted path arg preserved");
 
   const clear = parseCommand("/clear");
   assertEqual(clear.type, "clear", "/clear: type");
@@ -165,6 +193,10 @@ function verifyGateway(): void {
   const exit = parseCommand("/quit");
   assertEqual(exit.type, "exit", "/quit: aliases to exit");
 
+  const memory = parseCommand("/memory exact");
+  assertEqual(memory.type, "memory", "/memory: type");
+  assertEqual(memory.args[0], "exact", "/memory: mode arg");
+
   const unknown = parseCommand("/unknown");
   assertEqual(unknown.type, "chat", "Unknown command: routed as chat");
 
@@ -216,6 +248,15 @@ function verifyComponents(): void {
   assert(entry !== null, "LogEntry: renders element");
   assertEqual(entry.props.message.role, "assistant", "LogEntry: role");
 
+  const transcriptPreview = summarizeTranscriptDisplayText("x".repeat(5_000), 1_000, 48);
+  assertEqual(transcriptPreview.preview.length, 1_000, "Transcript preview helper clamps oversized message text");
+  assert(transcriptPreview.truncated, "Transcript preview helper marks oversized message text as truncated");
+  assertEqual(transcriptPreview.hiddenChars, 4_000, "Transcript preview helper reports hidden char count");
+
+  const lineLimitedPreview = summarizeTranscriptDisplayText("line1\nline2\nline3", 1_000, 2);
+  assertEqual(lineLimitedPreview.preview, "line1\nline2", "Transcript preview helper clamps oversized line count");
+  assert(lineLimitedPreview.truncated, "Transcript preview helper marks oversized line count as truncated");
+
   const messages: LogMessage[] = [
     { id: "1", role: "user", content: "Hello", timestamp: Date.now() },
     { id: "2", role: "assistant", content: "Hi", timestamp: Date.now() },
@@ -232,6 +273,8 @@ function verifyComponents(): void {
     activeRun: true,
     isThinking: true,
     thinkingLabel: "Planning...",
+    queuedPromptCount: 1,
+    queuedPromptPreview: "queued follow-up prompt",
     pendingApprovalTool: "file_read",
     loopDetected: false,
     circuitState: "closed" as const,
@@ -249,6 +292,8 @@ function verifyComponents(): void {
   assert(status !== null, "StatusBar: renders element");
   assertEqual(status.props.activeRun, true, "StatusBar: activeRun");
   assertEqual(status.props.isThinking, true, "StatusBar: isThinking");
+  assertEqual(status.props.queuedPromptCount, 1, "StatusBar: queued prompt count");
+  assertEqual(status.props.queuedPromptPreview, "queued follow-up prompt", "StatusBar: queued prompt preview");
   assertEqual(status.props.pendingApprovalTool, "file_read", "StatusBar: pending approval tool");
   assertEqual(status.props.provider, "anthropic", "StatusBar: provider");
   assertEqual(status.props.model, "claude-opus-4-6", "StatusBar: model");
@@ -406,8 +451,8 @@ function verifyComponents(): void {
   const caste = React.createElement(CasteLabel, { caste: "ROOT_QUEEN" });
   assert(caste !== null, "CasteLabel: renders element");
   assertEqual(caste.props.caste, "ROOT_QUEEN", "CasteLabel: caste prop");
-  assertEqual(formatCasteDisplay("assist_ant"), "Assist Ant", "Caste display: canonical lowercase");
-  assertEqual(formatCasteDisplay("ROOT_QUEEN"), "Root Queen", "Caste display: legacy uppercase");
+  assertEqual(formatCasteDisplay("assist_ant"), "Assist-Ant", "Caste display: canonical method label");
+  assertEqual(formatCasteDisplay("ROOT_QUEEN"), "Queen", "Caste display: legacy uppercase maps to method label");
 
   const thinking = React.createElement(ThinkingIndicator, {
     phase: "Generating response",
@@ -638,8 +683,19 @@ function verifyStoreBridge(): void {
   const runId = useColonyStore.getState().startRun("Thinking");
   assert(runId.startsWith("run-"), "Zustand: startRun returns run ID");
   assertEqual(useColonyStore.getState().isThinking, true, "Zustand: startRun marks active");
+  useColonyStore.getState().setThinkingState(true, "Thinking");
+  assertEqual(useColonyStore.getState().thinkingPhase, "Thinking", "Zustand: identical thinking state keeps label stable");
+  useColonyStore.getState().setThinkingState(true, "Planning");
+  assertEqual(useColonyStore.getState().thinkingPhase, "Planning", "Zustand: thinking state updates label when it changes");
+  useColonyStore.getState().requestInterrupt("Stopping current operation...");
+  assertEqual(useColonyStore.getState().interruptRequested, true, "Zustand: requestInterrupt marks active run as stopping");
+  assertEqual(useColonyStore.getState().isThinking, false, "Zustand: requestInterrupt clears thinking state");
+  useColonyStore.getState().setQueuedPrompt(1, "queued follow-up prompt");
+  assertEqual(useColonyStore.getState().queuedPromptCount, 1, "Zustand: queued prompt count stored");
+  assertEqual(useColonyStore.getState().queuedPromptPreview, "queued follow-up prompt", "Zustand: queued prompt preview stored");
   useColonyStore.getState().finishRun(runId);
   assertEqual(useColonyStore.getState().isThinking, false, "Zustand: finishRun marks idle");
+  assertEqual(useColonyStore.getState().interruptRequested, false, "Zustand: finishRun clears interrupt state");
 
   useColonyStore.getState().setWorkspaceInfo({
     root: process.cwd(),
@@ -669,6 +725,64 @@ function verifyStoreBridge(): void {
     stackHints: ["bun", "react", "ink", "typescript", "zustand"],
   });
   assertEqual(useColonyStore.getState().workspaceInfo?.name, "colony-ts", "Zustand: workspace info stored");
+  const workspaceInfoIdentity = useColonyStore.getState().workspaceInfo;
+  useColonyStore.getState().setWorkspaceInfo({
+    root: process.cwd(),
+    startDir: process.cwd(),
+    detected: true,
+    reason: "test",
+    markers: ["package.json"],
+    projectType: "bun",
+    packageManager: "bun",
+    name: "colony-ts",
+    workspaceMode: "single-package",
+    workspaceGlobs: ["apps/*", "packages/*"],
+    workspacePackageCount: 3,
+    workspaceAppCount: 1,
+    workspaceLibraryCount: 2,
+    workspaceOtherCount: 0,
+    workspaceAppPackages: ["console"],
+    workspaceLibraryPackages: ["runtime-core", "ui-shell"],
+    workspaceOtherPackages: [],
+    workspaceDevCandidates: ["console: bun --filter console run dev"],
+    workspaceVerifyCandidates: ["runtime-core: bun --filter runtime-core run verify:all"],
+    workspaceIntent: "terminal-app",
+    workspacePrimaryTargets: ["colony-ts"],
+    scriptNames: ["dev", "start", "build", "verify:all"],
+    devCommand: "bun run --watch src/index.tsx",
+    verifyCommand: "bun run verify:all",
+    stackHints: ["bun", "react", "ink", "typescript", "zustand"],
+  });
+  assert(
+    useColonyStore.getState().workspaceInfo === workspaceInfoIdentity,
+    "Zustand: identical workspace info does not churn identity",
+  );
+  assert(
+    sameWorkspaceInfo(workspaceInfoIdentity, useColonyStore.getState().workspaceInfo),
+    "Zustand: workspace equality helper matches stable workspace snapshot",
+  );
+
+  useColonyStore.getState().setQueuedPrompt(1, "queued follow-up prompt");
+  const queuedPromptCountIdentity = useColonyStore.getState().queuedPromptCount;
+  const queuedPromptPreviewIdentity = useColonyStore.getState().queuedPromptPreview;
+  useColonyStore.getState().setQueuedPrompt(1, "queued follow-up prompt");
+  assertEqual(useColonyStore.getState().queuedPromptCount, queuedPromptCountIdentity, "Zustand: identical queued prompt count stays stable");
+  assertEqual(useColonyStore.getState().queuedPromptPreview, queuedPromptPreviewIdentity, "Zustand: identical queued prompt preview stays stable");
+  useColonyStore.getState().setQueuedPrompt(0, null);
+  assertEqual(useColonyStore.getState().queuedPromptCount, 0, "Zustand: queued prompt count clears");
+  assertEqual(useColonyStore.getState().queuedPromptPreview, null, "Zustand: queued prompt preview clears");
+
+  const userQueue = createUserMessageQueue();
+  const queuedFirst = userQueue.enqueue("fix bug");
+  assert(queuedFirst.accepted, "Message queue: accepts first queued prompt");
+  assertEqual(queuedFirst.replaced, false, "Message queue: first prompt does not replace");
+  assertEqual(userQueue.depth(), 1, "Message queue: depth reflects queued prompt");
+  const queuedSecond = userQueue.enqueue("write tests");
+  assert(queuedSecond.accepted, "Message queue: accepts replacement prompt");
+  assertEqual(queuedSecond.replaced, true, "Message queue: second prompt supersedes older queued prompt");
+  assertEqual(userQueue.peek()?.content ?? "", "write tests", "Message queue: latest prompt stays queued");
+  const queuedDuplicate = userQueue.enqueue("write tests");
+  assertEqual(queuedDuplicate.duplicate, true, "Message queue: duplicate queued prompt is dropped");
 
   useColonyStore.getState().setStartupReport({
     passed: false,
@@ -679,6 +793,23 @@ function verifyStoreBridge(): void {
     ],
   });
   assertEqual(useColonyStore.getState().startupReport?.warningCount, 2, "Zustand: startup report stored");
+  const startupReportIdentity = useColonyStore.getState().startupReport;
+  useColonyStore.getState().setStartupReport({
+    passed: false,
+    errorCount: 1,
+    warningCount: 2,
+    checks: [
+      { name: "Ollama server", passed: false, severity: "warning", message: "offline" },
+    ],
+  });
+  assert(
+    useColonyStore.getState().startupReport === startupReportIdentity,
+    "Zustand: identical startup report does not churn identity",
+  );
+  assert(
+    sameStartupReport(startupReportIdentity, useColonyStore.getState().startupReport),
+    "Zustand: startup-report equality helper matches stable report",
+  );
 
   useColonyStore.getState().setProviderDiagnostics(
     {
@@ -716,6 +847,70 @@ function verifyStoreBridge(): void {
     },
   ]);
   assertEqual(useColonyStore.getState().persistedSessions.length, 1, "Zustand: persisted sessions stored");
+  const persistedSessionsIdentity = useColonyStore.getState().persistedSessions;
+  useColonyStore.getState().setPersistedSessions([
+    {
+      sessionId: "ses_saved_1",
+      agentId: "assist-ant",
+      caste: "assist_ant",
+      savedAt: "2026-04-16T10:00:00.000Z",
+      lastMessageAt: "2026-04-16T10:00:00.000Z",
+      messageCount: 2,
+      tokensUsed: 10,
+      costUsd: 0,
+      interruption: "none",
+      hasCheckpoint: true,
+      previewText: "ok",
+      previewRole: "assistant",
+    },
+  ]);
+  assert(
+    useColonyStore.getState().persistedSessions === persistedSessionsIdentity,
+    "Zustand: identical persisted sessions do not churn array identity",
+  );
+  assert(
+    samePersistedSessionSummaries(
+      persistedSessionsIdentity,
+      useColonyStore.getState().persistedSessions,
+    ),
+    "Zustand: persisted session equality helper matches stable catalogs",
+  );
+  const providerHealthIdentity = useColonyStore.getState().providerHealth;
+  const failoverIdentity = useColonyStore.getState().recentFailovers;
+  useColonyStore.getState().setProviderDiagnostics(
+    {
+      local: { state: "open", failureCount: 2 },
+      anthropic: { state: "closed", failureCount: 0 },
+    },
+    [
+      {
+        fromProvider: "local",
+        fromModel: "llama3.2",
+        toProvider: "anthropic",
+        toModel: "claude-sonnet-4-5-20250929",
+        errorType: "LLMConnectionError",
+        errorMessage: "offline",
+        timestamp: failoverIdentity[0]?.timestamp ?? Date.now(),
+      },
+    ],
+  );
+  assert(
+    useColonyStore.getState().providerHealth === providerHealthIdentity,
+    "Zustand: identical provider diagnostics do not churn provider-health identity",
+  );
+  assert(
+    useColonyStore.getState().recentFailovers === failoverIdentity,
+    "Zustand: identical provider diagnostics do not churn failover identity",
+  );
+  assert(
+    sameProviderDiagnostics(
+      providerHealthIdentity,
+      useColonyStore.getState().providerHealth,
+      failoverIdentity,
+      useColonyStore.getState().recentFailovers,
+    ),
+    "Zustand: provider diagnostic equality helper matches stable diagnostics",
+  );
 
   const approval = buildApprovalRequest(
     { id: "call-1", name: "file_read", arguments: { path: "README.md" } },
@@ -734,6 +929,12 @@ function verifyStoreBridge(): void {
 
   useColonyStore.getState().setSessionAllowRules(["tool:b", "tool:a"]);
   assertEqual(useColonyStore.getState().sessionAllowRules[0], "tool:a", "Zustand: session allow rules sorted");
+  const sessionAllowRulesIdentity = useColonyStore.getState().sessionAllowRules;
+  useColonyStore.getState().setSessionAllowRules(["tool:a", "tool:b"]);
+  assert(
+    useColonyStore.getState().sessionAllowRules === sessionAllowRulesIdentity,
+    "Zustand: identical session allow rules do not churn array identity",
+  );
 
   useColonyStore.getState().setContextUsage({
     usedTokens: 640,
@@ -749,6 +950,29 @@ function verifyStoreBridge(): void {
   assertEqual(useColonyStore.getState().contextUsage?.usedTokens, 640, "Zustand: context usage stored");
   assertEqual(useColonyStore.getState().tokensUsed, 640, "Zustand: context usage syncs tokens used");
   assertEqual(useColonyStore.getState().maxTokens, 1280, "Zustand: context usage syncs max tokens");
+  const contextUsageIdentity = useColonyStore.getState().contextUsage;
+  useColonyStore.getState().setContextUsage({
+    usedTokens: 640,
+    maxTokens: 1280,
+    remainingTokens: 640,
+    percentUsed: 50,
+    messageCount: 3,
+    isAboveWarningThreshold: false,
+    isAboveAutoCompactThreshold: false,
+    isAtBlockingLimit: false,
+    compactionFailureCount: 2,
+  });
+  assert(
+    useColonyStore.getState().contextUsage === contextUsageIdentity,
+    "Zustand: identical context usage does not churn snapshot identity",
+  );
+  assert(
+    sameContextWindowSnapshot(
+      contextUsageIdentity,
+      useColonyStore.getState().contextUsage,
+    ),
+    "Zustand: context-usage equality helper matches stable snapshots",
+  );
 
   useColonyStore.getState().setLastCompaction({
     compacted: true,
@@ -766,6 +990,77 @@ function verifyStoreBridge(): void {
     summaryLineCount: 3,
   });
   assertEqual(useColonyStore.getState().lastCompaction?.strategyUsed, "reactive", "Zustand: last compaction stored");
+  const lastCompactionIdentity = useColonyStore.getState().lastCompaction;
+  useColonyStore.getState().setLastCompaction({
+    compacted: true,
+    originalCount: 15,
+    finalCount: 9,
+    summary: "summary",
+    tokensSavedEstimate: 300,
+    messages: lastCompactionIdentity?.messages ?? [],
+    strategyUsed: "reactive",
+    triggerSource: "reactive_overflow",
+    usageBeforeFraction: 0.98,
+    preservedSystemCount: 1,
+    preservedRecentCount: 6,
+    summarizedMessageCount: 8,
+    summaryLineCount: 3,
+  });
+  assert(
+    useColonyStore.getState().lastCompaction === lastCompactionIdentity,
+    "Zustand: identical last compaction does not churn identity",
+  );
+  assert(
+    sameCompactionResult(lastCompactionIdentity, useColonyStore.getState().lastCompaction),
+    "Zustand: compaction-result equality helper matches stable result",
+  );
+
+  useColonyStore.getState().setLastCompactionFailure({ strategy: "reactive", message: "still full" });
+  const lastCompactionFailureIdentity = useColonyStore.getState().lastCompactionFailure;
+  useColonyStore.getState().setLastCompactionFailure({ strategy: "reactive", message: "still full" });
+  assert(
+    useColonyStore.getState().lastCompactionFailure === lastCompactionFailureIdentity,
+    "Zustand: identical compaction failure does not churn identity",
+  );
+  assert(
+    sameCompactionFailure(lastCompactionFailureIdentity, useColonyStore.getState().lastCompactionFailure),
+    "Zustand: compaction-failure equality helper matches stable failure",
+  );
+
+  useColonyStore.getState().setLatestCompactionHandoff({
+    status: "ok",
+    strategy: "reactive",
+    trigger: "manual",
+    timestamp: 123,
+    loggedCount: 2,
+    structuredCount: 1,
+    artifactId: "artifact-1",
+    artifactChars: 42,
+  });
+  const latestCompactionHandoffIdentity = useColonyStore.getState().latestCompactionHandoff;
+  useColonyStore.getState().setLatestCompactionHandoff({
+    status: "ok",
+    strategy: "reactive",
+    trigger: "manual",
+    timestamp: 123,
+    loggedCount: 2,
+    structuredCount: 1,
+    artifactId: "artifact-1",
+    artifactChars: 42,
+  });
+  assert(
+    useColonyStore.getState().latestCompactionHandoff === latestCompactionHandoffIdentity,
+    "Zustand: identical compaction handoff does not churn identity",
+  );
+  assert(
+    sameCompactionHandoff(latestCompactionHandoffIdentity, useColonyStore.getState().latestCompactionHandoff),
+    "Zustand: compaction-handoff equality helper matches stable handoff",
+  );
+
+  useColonyStore.getState().setError("same error");
+  const lastErrorIdentity = useColonyStore.getState().lastError;
+  useColonyStore.getState().setError("same error");
+  assertEqual(useColonyStore.getState().lastError, lastErrorIdentity, "Zustand: identical error keeps same value");
 
   useColonyStore.getState().scrollLog(5, 1);
   assertEqual(useColonyStore.getState().logScrollOffset, 0, "Zustand: scrollLog clamps when transcript is short");
@@ -860,6 +1155,7 @@ async function verifyCommandExecutor(): Promise<void> {
   let cleared = 0;
   let budgetCap = 0;
   const selectedProviders: string[] = [];
+  const selectedMemoryModes: Array<string | null> = [];
 
   const handlers = {
     submitChat: async (message: string) => { actions.push(`submit:${message}`); },
@@ -868,10 +1164,14 @@ async function verifyCommandExecutor(): Promise<void> {
     requestCompaction: async (strategy = "standard") => { actions.push(`compact:${strategy}`); },
     setBudgetCap: (maxUsd: number) => { budgetCap = maxUsd; actions.push(`budget:${maxUsd}`); },
     setProviderSelection: async (provider: string) => { selectedProviders.push(provider); actions.push(`provider:${provider}`); },
+    setMemoryTruthMode: async (mode: string | null) => { selectedMemoryModes.push(mode); actions.push(`memory:${mode ?? "auto"}`); },
+    startSwarm: async (objective: string) => { actions.push(`swarm:${objective}`); return `Started swarm: ${objective}`; },
+    cancelSwarm: async (runId: string) => { actions.push(`swarm-cancel:${runId}`); return `Cancelled swarm: ${runId}`; },
     showSystemMessage: (message: string) => { actions.push(`system:${message}`); },
     showErrorMessage: (message: string) => { actions.push(`error:${message}`); },
     cancelRun: () => { actions.push("cancel"); },
     isRunActive: () => false,
+    isRunCancelling: () => false,
   };
 
   const parser = new SlashCommandParser({
@@ -893,6 +1193,7 @@ async function verifyCommandExecutor(): Promise<void> {
       model: "llama3.2",
       selectedProvider: "local",
       selectedModel: "llama3.2",
+      memoryTruthModeOverride: "prefer_exact",
       providerDefaults: {
         anthropic: "claude-sonnet-4-5",
         local: "llama3.2",
@@ -933,8 +1234,9 @@ async function verifyCommandExecutor(): Promise<void> {
 
   actions.length = 0;
   await executeCommand(parser.tryHandle("/swarm build api"), handlers);
-  assert(actions.some((entry) => entry.includes("active agent only")), "Executor: /swarm warns about alias behavior");
-  assert(actions.includes("submit:build api"), "Executor: /swarm submits chat");
+  assert(actions.some((entry) => entry.includes("Swarm execution requested")), "Executor: /swarm announces orchestrated execution");
+  assert(actions.includes("swarm:build api"), "Executor: /swarm starts swarm runtime");
+  assert(!actions.includes("submit:build api"), "Executor: /swarm no longer submits chat");
 
   actions.length = 0;
   await executeCommand(parser.tryHandle("/budget 2.5"), handlers);
@@ -951,6 +1253,12 @@ async function verifyCommandExecutor(): Promise<void> {
   await executeCommand(parser.tryHandle("/model anthropic claude-sonnet-4-5-20250929"), handlers);
   assert(actions.includes("provider:anthropic"), "Executor: /model routes through provider-selection handler");
   assert(actions.some((entry) => entry.includes("Model selection updated:")), "Executor: /model emits model selection message");
+
+  actions.length = 0;
+  await executeCommand(parser.tryHandle("/memory derived"), handlers);
+  assert(actions.includes("memory:derived_only"), "Executor: /memory routes through memory-mode handler");
+  assertEqual(selectedMemoryModes.at(-1), "derived_only", "Executor: /memory preserves selected truth mode");
+  assert(actions.some((entry) => entry.includes("Memory recall mode updated:")), "Executor: /memory emits memory update message");
 
   actions.length = 0;
   await executeCommand(parser.tryHandle("/cancel"), handlers);
@@ -1016,17 +1324,29 @@ async function verifyCommandExecutor(): Promise<void> {
 
   actions.length = 0;
   await executeCommand(parser.tryHandle("/swarm build api"), busyHandlers);
-  assert(actions.some((entry) => entry.includes("active agent only")), "Executor: busy /swarm still warns about alias behavior");
+  assert(actions.some((entry) => entry.includes("Swarm execution requested")), "Executor: busy /swarm announces orchestrated execution");
+  assert(actions.includes("swarm:build api"), "Executor: busy /swarm still starts swarm runtime");
   assert(!actions.includes("submit:build api"), "Executor: busy /swarm does not submit chat");
-  assert(
-    actions.some((entry) => entry.includes("Use /cancel, Ctrl+C, or Esc first")),
-    "Executor: busy submit emits guard message",
-  );
 
   actions.length = 0;
   await executeCommand(parser.tryHandle("/cancel"), busyHandlers);
   assert(actions.includes("cancel"), "Executor: busy /cancel fires cancel handler");
   assert(actions.some((entry) => entry.includes("Canceling active Colony run")), "Executor: busy /cancel emits cancellation message");
+
+  actions.length = 0;
+  const cancellingHandlers = {
+    ...handlers,
+    isRunActive: () => true,
+    isRunCancelling: () => true,
+  };
+  await executeCommand(parser.tryHandle("/cancel"), cancellingHandlers);
+  assert(!actions.includes("cancel"), "Executor: stopping /cancel does not refire cancel handler");
+  assert(actions.some((entry) => entry.includes("Cancellation already in progress")), "Executor: stopping /cancel reports in-flight cancellation");
+
+  actions.length = 0;
+  await executeCommand(parser.tryHandle("/clear"), cancellingHandlers);
+  assert(!actions.includes("reset"), "Executor: stopping /clear does not reset session");
+  assert(actions.some((entry) => entry.includes("run is stopping")), "Executor: stopping /clear reports cancel-drain guard");
 
   actions.length = 0;
   await executeCommand(parser.tryHandle("/bogus"), handlers);
@@ -1039,6 +1359,74 @@ async function verifyApprovalUxGuards(): Promise<void> {
   const appSource = await Bun.file("./src/ui/app.tsx").text();
   const componentSource = await Bun.file("./src/ui/components.tsx").text();
   const loopHookSource = await Bun.file("./src/ui/use-colony-loop.ts").text();
+
+  const unsavedCurrentShortcuts = buildLiveSessionShortcutSnapshot({
+    currentSessionId: "ses_live_current",
+    currentMessageCount: 3,
+    currentLatestMessageTimestamp: Date.parse("2026-04-21T13:00:00.000Z"),
+    currentAwaitingReply: true,
+    persistedSessions: [
+      {
+        sessionId: "ses_saved_latest",
+        agentId: "saved-agent",
+        caste: "assist_ant",
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        savedAt: "2026-04-21T12:00:00.000Z",
+        lastMessageAt: "2026-04-21T12:00:00.000Z",
+        messageCount: 8,
+        tokensUsed: 1000,
+        costUsd: 0.01,
+        interruption: "none",
+        hasCheckpoint: true,
+        previewText: "saved latest",
+        previewRole: "assistant",
+      },
+    ],
+  });
+  assertEqual(resolveSmartHistoryCommand(unsavedCurrentShortcuts, 8), "/history current 8", "Session shortcuts: smart history prefers live current transcript");
+  assertEqual(resolveSmartResumeCommand(unsavedCurrentShortcuts), "/resume latest", "Session shortcuts: smart resume still points at latest persisted session");
+  assertEqual(buildLiveCurrentHistoryHint(unsavedCurrentShortcuts, 8), "/history current 8 | /history pending 8 | /history latest 8 | /history ses_live_current 8", "Session shortcuts: live history hint keeps current, pending, latest, and exact-id paths");
+  assertEqual(buildLiveCurrentResumeHint(unsavedCurrentShortcuts), "/status | /cost | /clear", "Session shortcuts: unsaved live current row stops advertising fake resume commands");
+  assertEqual(buildPersistedSessionResumeHint({
+    sessionId: "ses_saved_latest",
+    sessionCatalogIndex: 1,
+    currentTarget: false,
+    snapshot: unsavedCurrentShortcuts,
+  }), "/resume latest | /resume 1 | /resume ses_saved_latest", "Session shortcuts: latest persisted row keeps truthful latest and direct resume targets");
+  assertEqual(buildPersistedSessionHistoryHint({
+    sessionId: "ses_saved_latest",
+    sessionCatalogIndex: 1,
+    currentTarget: false,
+    snapshot: unsavedCurrentShortcuts,
+    count: 8,
+  }), "/history 1 8 | /history ses_saved_latest 8", "Session shortcuts: persisted rows do not claim live-current aliases when current owns them");
+
+  const resumedCurrentShortcuts = buildLiveSessionShortcutSnapshot({
+    currentSessionId: "ses_saved_latest",
+    currentMessageCount: 4,
+    currentLatestMessageTimestamp: Date.parse("2026-04-21T12:00:00.000Z"),
+    currentAwaitingReply: false,
+    persistedSessions: [
+      {
+        sessionId: "ses_saved_latest",
+        agentId: "saved-agent",
+        caste: "assist_ant",
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        savedAt: "2026-04-21T12:00:00.000Z",
+        lastMessageAt: "2026-04-21T12:00:00.000Z",
+        messageCount: 8,
+        tokensUsed: 1000,
+        costUsd: 0.01,
+        interruption: "none",
+        hasCheckpoint: true,
+        previewText: "saved latest",
+        previewRole: "assistant",
+      },
+    ],
+  });
+  assertEqual(buildLiveCurrentResumeHint(resumedCurrentShortcuts), "/resume latest | /resume ses_saved_latest | /status | /cost | /clear", "Session shortcuts: resumed current row advertises truthful latest and exact-id resume targets");
 
   const deniedRequest = buildApprovalRequest(
     { id: "call-denied", name: "shell_exec", arguments: { command: "sudo rm -rf /tmp/test" } },
@@ -1096,22 +1484,27 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(appSource.includes("Approval pending: y once, n deny, a exact-call, s inspect, esc cancel"), "Locked input placeholder explains approval shortcuts");
   assert(appSource.includes("const currentSessionId = useColonyStore((state) => state.sessionId);"), "Input panel uses targeted selector for live current session id");
   assert(appSource.includes("const startupReport = useColonyStore((state) => state.startupReport);"), "Input panel uses targeted selector for startup report");
-  assert(appSource.includes("function buildLiveHistoryHint(options:"), "App defines shared live history hint helper");
-  assert(appSource.includes("currentPendingAlias ? \"/history pending 8\" : null"), "Live history helper adds pending alias when current session owns pending");
-  assert(appSource.includes("currentLatestAlias ? \"/history latest 8\" : null"), "Live history helper adds latest alias when current session owns latest");
-  assert(appSource.includes("const activeHistoryHint = buildLiveHistoryHint({"), "Input panel computes live history hint through shared helper");
+  assert(appSource.includes("buildLiveSessionShortcutSnapshot({"), "App builds live session shortcut snapshot through shared helper");
+  assert(appSource.includes("resolveSmartHistoryCommand(shortcuts, 8);"), "App routes smart history shortcut through shared session helper");
+  assert(appSource.includes("resolveSmartResumeCommand(shortcuts);"), "App routes smart resume shortcut through shared session helper");
+  assert(appSource.includes("const activeHistoryHint = buildLiveCurrentHistoryHint(liveSessionShortcuts, 8);"), "Panels compute live history hint through shared session helper");
+  assert(!appSource.includes("function buildLiveHistoryHint(options:"), "App no longer duplicates live history helper logic inline");
   assert(appSource.includes("const startupPlaceholder = formatStartupPlaceholder(startupReport);"), "Input panel derives startup block placeholder from startup report");
+  assert(appSource.includes("const interruptRequested = useColonyStore((state) => state.interruptRequested);"), "Panels use targeted selector for interrupt-in-progress truth");
+  assert(appSource.includes("Stopping current run... /status /cost ${activeHistoryHint}"), "Input placeholder explains stopping-run state with exact inspect commands");
   assert(appSource.includes("Streaming response... /cancel or Ctrl+C/Esc stops | /status /cost ${activeHistoryHint}"), "Active-run placeholder explains exact current-session inspection commands");
   assert(appSource.includes("Run active... /cancel or Ctrl+C/Esc stops | /status /cost ${activeHistoryHint}"), "Paused active-run placeholder keeps exact current-session inspection commands visible");
   assert(appSource.includes(": startupPlaceholder"), "Idle input placeholder switches to startup-block guidance when readiness errors exist");
   assert(appSource.includes("activeHistoryHint={activeHistoryHint}"), "Status panel passes shared live history hint into status bar");
   assert(componentSource.includes("activeHistoryHint = \"/history current 8\""), "Status bar accepts resolved live history hint prop");
-  assert(componentSource.includes("... {thinkingLabel} | /cancel /status /cost | {activeHistoryHint}"), "Status bar surfaces exact current-session inspect commands during streaming");
-  assert(componentSource.includes("Run active | /cancel /status /cost | {activeHistoryHint}"), "Status bar keeps exact current-session inspect commands visible when run is active but not thinking");
+  assert(componentSource.includes("Stopping current run...{queuedPromptCount > 0 ? ` | next:${queuedPromptPreview ?? \"queued prompt\"}` : \"\"} | /status /cost | {activeHistoryHint}"), "Status bar surfaces stopping-run truth with exact current-session inspect commands");
+  assert(componentSource.includes("... {thinkingLabel}{queuedPromptCount > 0 ? ` | next:${queuedPromptPreview ?? \"queued prompt\"}` : \"\"} | /cancel /status /cost | {activeHistoryHint}"), "Status bar surfaces exact current-session inspect commands during streaming");
+  assert(componentSource.includes("Run active{queuedPromptCount > 0 ? ` | next:${queuedPromptPreview ?? \"queued prompt\"}` : \"\"} | /cancel /status /cost | {activeHistoryHint}"), "Status bar keeps exact current-session inspect commands visible when run is active but not thinking");
   assert(componentSource.includes("run:{provider}:{model}"), "Status bar surfaces current runtime provider/model");
   assert(componentSource.includes("next:{selectedProvider}:{selectedModel}"), "Status bar surfaces pending next-run provider/model selection");
+  assert(componentSource.includes("memory:{memoryLabel} /memory"), "Status bar surfaces current memory recall mode");
   assert(componentSource.includes("Approval: {pendingApprovalTool} pending (y/n/a/s/esc | /tools)"), "Status bar surfaces pending approval tool, shortcuts, and /tools inspect path");
-  assert(componentSource.includes("doctor:E${startupErrors}/W${startupWarnings} /doctor"), "Status bar points operators to /doctor when startup issues exist");
+  assert(componentSource.includes("doctor:E${startupErrors}/W${startupWarnings} ${startupInspectCommand ?? \"/doctor\"}"), "Status bar points operators to the focused /doctor view when startup issues exist");
   assert(componentSource.includes("run:</Text>"), "Header labels current runtime provider/model");
   assert(componentSource.includes("next:{selectedProvider}:{selectedModel}"), "Header can surface pending next-run provider/model selection");
   assert(componentSource.includes("Input paused while approval prompt is active."), "Approval prompt explains modal input pause");
@@ -1128,6 +1521,11 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(componentSource.includes("export const LogEntry = React.memo(function LogEntry"), "LogEntry uses React.memo to avoid repainting unchanged rows");
   assert(componentSource.includes("export const LogPane = React.memo(function LogPane"), "LogPane uses React.memo to limit parent-driven transcript redraws");
   assert(componentSource.includes("React.useMemo(() => {"), "LogPane memoizes transcript viewport calculations");
+  assert(componentSource.includes("export function summarizeTranscriptDisplayText("), "Face layer exposes bounded transcript display helper");
+  assert(componentSource.includes("const contentPreview = summarizeTranscriptDisplayText(message.content);"), "Log entry builds bounded display preview for transcript rows");
+  assert(componentSource.includes("more chars hidden in face | transcript truth kept"), "Transcript rows tell truth when face clamps oversized content");
+  assert(componentSource.includes("const currentSessionPreview = summarizeTranscriptDisplayText(currentPreviewText, 240, 3);"), "Budget widget bounds live current preview text");
+  assert(componentSource.includes("const savedSessionPreview = summarizeTranscriptDisplayText(session.previewText ?? \"\", 240, 3);"), "Budget widget bounds persisted session preview text");
   assert(!appSource.includes("const state = useColonyStore();"), "App no longer subscribes to the entire view store");
   assert(appSource.includes("const activeRun = useColonyStore((state) => Boolean(state.activeRunId));"), "App uses targeted selector for active-run truth in face panels");
   assert(appSource.includes("const pendingApproval = useColonyStore((state) => state.pendingApproval);"), "App uses targeted selector for approval state");
@@ -1141,11 +1539,11 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(appSource.includes("case \"history\":"), "App handles smart history shortcut action");
   assert(appSource.includes("case \"resume\":"), "App handles smart resume shortcut action");
   assert(appSource.includes("handleSubmit(\"/sessions\");"), "App session-nav shortcut opens session catalog");
-  assert(appSource.includes("handleSubmit(\"/history current 8\");"), "App smart history shortcut prefers live current history");
-  assert(appSource.includes("handleSubmit(\"/history pending 8\");"), "App smart history shortcut falls back to pending history");
-  assert(appSource.includes("handleSubmit(\"/history latest 8\");"), "App smart history shortcut falls back to latest history");
-  assert(appSource.includes("handleSubmit(\"/resume pending\");"), "App smart resume shortcut prefers pending resume");
-  assert(appSource.includes("handleSubmit(\"/resume latest\");"), "App smart resume shortcut falls back to latest resume");
+  assert(appSource.includes("const command = resolveSmartHistoryCommand(shortcuts, 8);"), "App smart history shortcut resolves through shared live-session helper");
+  assert(appSource.includes("const command = resolveSmartResumeCommand(shortcuts);"), "App smart resume shortcut resolves through shared live-session helper");
+  assert(appSource.includes("if (useColonyStore.getState().interruptRequested) {"), "App blocks repeated Ctrl+C while cancellation is already in progress");
+  assert(appSource.includes("Cancellation already in progress."), "App tells operator when cancellation is already underway");
+  assert(appSource.includes("if (key.escape && useColonyStore.getState().activeRunId && !useColonyStore.getState().interruptRequested)"), "App ignores repeated Esc once cancellation is already underway");
   assertEqual(resolveSessionNavAction("j", { ctrl: true }), "sessions", "Session-nav helper: Ctrl+J opens session catalog");
   assertEqual(resolveSessionNavAction("g", { ctrl: true }), "history", "Session-nav helper: Ctrl+G opens smart history");
   assertEqual(resolveSessionNavAction("r", { ctrl: true }), "resume", "Session-nav helper: Ctrl+R opens smart resume");
@@ -1157,21 +1555,26 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assertEqual(SESSION_NAV_LABEL, "Ctrl+J sessions | Ctrl+G history | Ctrl+R resume smart", "Session-nav label uses non-Backspace history chord");
   assert(componentSource.includes("Commands: /help, /status, /cost, /sessions, /history, /resume"), "Welcome banner advertises transcript/session commands");
   assert(componentSource.includes("Session views: /sessions pending|current | /history latest|pending|current | /resume latest|pending"), "Welcome banner advertises saved-session filters and aliases");
-  assert(componentSource.includes("Runtime: /doctor, /provider, /model, /perf, /permissions, /tools, /hooks, /events, /events perf, /budget, /compact smart, /cancel"), "Welcome banner advertises unified /perf alongside runtime control surface");
+  assert(componentSource.includes("Runtime: /doctor, /provider, /model, /memory, /workflow, /perf, /permissions, /tools, /hooks, /events, /events perf, /budget, /compact smart, /cancel"), "Welcome banner advertises memory, workflow, and unified /perf on runtime control surface");
+  assert(componentSource.includes("Memory recall: {memoryLabel} | /memory auto|exact|derived|balanced|prefer-exact|prefer-derived"), "Welcome banner advertises current memory recall mode and controls");
   assert(componentSource.includes("Policy views: /permissions active|allowed|denied|rules | /tools approvals|recent|artifacts|perf"), "Welcome banner advertises permission and tool drill-down views");
   assert(appSource.includes("const pendingCompactionStrategy = useColonyStore((state) => state.pendingCompactionStrategy);"), "Panels use targeted selector for queued compaction");
   assert(appSource.includes("const lastCompactionFailure = useColonyStore((state) => state.lastCompactionFailure);"), "Budget panel uses targeted selector for last compaction failure");
   assert(appSource.includes("const currentMessages = useColonyStore((state) => state.messages);"), "Budget panel reads live transcript for smart compaction recommendation");
+  assert(appSource.includes("function buildCompactionRecommendationHistory("), "App defines bounded history helper for budget compaction recommendation");
+  assert(appSource.includes("history: buildCompactionRecommendationHistory(currentMessages)"), "Face recommendation uses bounded live transcript history for long-session performance");
   assert(appSource.includes("const currentSessionId = useColonyStore((state) => state.sessionId);"), "Status panel uses targeted selector for live current session id");
   assert(appSource.includes("const selectedProvider = useColonyStore((state) => state.selectedProvider);"), "App uses targeted selector for selected provider truth in face panels");
   assert(appSource.includes("const selectedModel = useColonyStore((state) => state.selectedModel);"), "App uses targeted selector for selected model truth in face panels");
+  assert(appSource.includes("const memoryTruthModeOverride = useColonyStore((state) => state.memoryTruthModeOverride);"), "App uses targeted selector for memory recall truth in face panels");
   assert(appSource.includes("selectedProvider={selectedProvider}"), "App forwards selected provider truth into face panels");
   assert(appSource.includes("selectedModel={selectedModel}"), "App forwards selected model truth into face panels");
+  assert(appSource.includes("memoryTruthModeOverride={memoryTruthModeOverride}"), "App forwards memory recall truth into face panels");
   assert(appSource.includes("const pendingApprovalSnapshot: typeof pendingApproval = useColonyStore.getState().pendingApproval;"), "App caches typed pending approval snapshot for slash-context forwarding");
   assert(appSource.includes("toolName: pendingApprovalSnapshot?.toolName"), "App forwards pending approval tool name to slash context");
   assert(appSource.includes("signature: pendingApprovalSnapshot?.signature"), "App forwards pending approval signature to slash context");
   assert(appSource.includes("sessionRules: store.sessionAllowRules"), "App forwards exact-signature session rules to slash context");
-  assert(appSource.includes("activeRun: Boolean(store.activeRunId)"), "App forwards active-run truth to slash context");
+  assert(appSource.includes("activeRun: Boolean(store.activeRunId || store.interruptRequested)"), "App forwards stopping-aware active-run truth to slash context");
   assert(appSource.includes("selectedProvider: runtimeSummary.defaultProvider"), "App forwards selected provider to slash context");
   assert(appSource.includes("selectedModel: runtimeSummary.defaultModel"), "App forwards selected model to slash context");
   assert(appSource.includes("providerDefaults: runtimeSummary.providerDefaults"), "App forwards configured provider default models to slash context");
@@ -1179,6 +1582,7 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(appSource.includes("supportedKinds: runtimeSummary.supportedHookKinds"), "App forwards supported hook kinds into slash context");
   assert(appSource.includes("recentEvents: recentHookEvents.map((event) => ({ ...event }))"), "App forwards recent hook events into slash context");
   assert(appSource.includes("setProviderSelection,"), "App passes provider-selection handler into command executor");
+  assert(appSource.includes("isRunActive: () => Boolean(useColonyStore.getState().activeRunId || useColonyStore.getState().interruptRequested)"), "Command executor guard treats stopping runs as still active");
   assert(!appSource.includes("Rule list: ${current.sessionAllowRules.join(\", \")}"), "App no longer patches /permissions output in the UI layer");
   assert(appSource.includes("formatPendingApprovalMessage(request)"), "App uses shared pending-approval formatter for inspect transcript");
   assert(appSource.includes("toolName: request.toolName"), "Approval inspect action keeps blocked tool identity on transcript entry");
@@ -1194,7 +1598,7 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(componentSource.includes("parseDeniedToolResultMessage(message.content)"), "Recent-tool helper understands denied tool transcript entries");
   assert(componentSource.includes("parsePersistedToolResultMessage(message.content)"), "Recent-tool helper understands externalized tool transcript entries");
   assert(appSource.includes("recommendCompaction({"), "App uses shared smart-compaction helper for face recommendation");
-  assert(appSource.includes("history: currentMessages.map(logMessageToSerializedMessage)"), "Face recommendation uses live transcript history");
+  assert(!appSource.includes("history: currentMessages.map(logMessageToSerializedMessage)"), "Face recommendation no longer scans the full live transcript for budget hints");
   assert(appSource.includes("const recentToolActivity = React.useMemo("), "App memoizes recent live tool activity for budget panel");
   assert(appSource.includes("summarizeRecentToolActivity(currentMessages, 3)"), "App derives recent tool activity from live transcript");
   assert(appSource.includes("const recentHookEvents = useColonyStore((state) => state.recentHookEvents);"), "Panels use targeted selector for recent hook events");
@@ -1233,6 +1637,7 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(componentSource.includes("LLM now: {provider}:{model}"), "Budget widget surfaces current provider/model truth");
   assert(componentSource.includes("LLM next: {selectedProvider}:{selectedModel}"), "Budget widget surfaces pending next-run provider/model truth");
   assert(componentSource.includes("LLM next: same as current"), "Budget widget tells truth when no provider/model change is pending");
+  assert(componentSource.includes("Memory: {memoryLabel} | /memory"), "Budget widget surfaces current memory recall truth");
   assert(componentSource.includes("Workspace detail: ${workspaceInfo.workspaceMode ?? \"single-package\"} | ${workspaceInfo.stackHints.join(\", \")}"), "Budget widget surfaces workspace mode and stack hints");
   assert(componentSource.includes("Intent: ${workspaceInfo.workspaceIntent}"), "Budget widget surfaces workspace intent");
   assert(componentSource.includes("Targets: ${workspaceInfo.workspacePrimaryTargets.slice(0, 3).join(\", \")}"), "Budget widget surfaces workspace primary targets");
@@ -1248,7 +1653,8 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(componentSource.includes("{check.severity}: {check.name} - {check.message}"), "Budget widget surfaces startup issue message detail");
   assert(componentSource.includes("fix: {check.fix}"), "Budget widget surfaces startup fix detail");
   assert(componentSource.includes("Provider focus: {currentProviderSummary}"), "Budget widget surfaces current provider diagnostics focus");
-  assert(componentSource.includes("Inspect: /doctor | /doctor errors | /doctor warnings | /doctor workspace | /doctor config | /doctor data | /doctor terminal | /doctor local | /doctor cloud | /doctor providers | /doctor failovers | /doctor first-run"), "Budget widget surfaces doctor drill-down hints");
+  assert(componentSource.includes("Focus: {startupFocusCommand} | /doctor first-run"), "Budget widget surfaces focused startup doctor hint");
+  assert(componentSource.includes("Inspect: {startupInspectLine} | /doctor workspace | /doctor config | /doctor data | /doctor terminal | /doctor local | /doctor cloud | /doctor providers | /doctor failovers"), "Budget widget surfaces doctor drill-down hints");
   assert(componentSource.includes("Latest failover: {formatProviderFailoverFace({"), "Budget widget surfaces latest failover summary in doctor panel");
   assert(componentSource.includes("Latest error: {latestFailover.errorMessage}"), "Budget widget surfaces latest failover error detail in doctor panel");
   assert(componentSource.includes("Recent failovers: {recentFailoverHistory.length} | /doctor failovers"), "Budget widget surfaces failover-history drill-down hint");
@@ -1262,15 +1668,11 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(componentSource.includes("Inspect: /provider | /provider {provider} | /provider perf {provider} | /provider failovers {provider} | /model | /status"), "Budget widget surfaces exact current-provider inspect path");
   assert(componentSource.includes("` / recent ${providerFailoverCounts[providerName]}`"), "Budget widget surfaces recent failover counts beside provider health rows");
   assert(componentSource.includes("inspect {providerName}: /provider {providerName} | /provider perf {providerName} | /provider failovers {providerName} | /doctor {providerName}"), "Budget widget surfaces focused per-provider inspect paths");
-  assert(componentSource.includes("const newestInterruptedIndex = persistedSessions.findIndex((session) => session.interruption !== \"none\");"), "Budget widget tracks newest interrupted persisted session for fast resume hint");
+  assert(componentSource.includes("buildLiveSessionShortcutSnapshot({"), "Budget widget builds live-session shortcut snapshot through shared helper");
   assert(componentSource.includes("const currentTarget = currentSessionId && currentSessionId === session.sessionId;"), "Budget widget detects when a persisted row is also the active current session");
-  assert(componentSource.includes("const pendingTarget = newestInterruptedIndex === index && session.interruption !== \"none\";"), "Budget widget detects newest interrupted persisted session for pending alias");
-  assert(componentSource.includes("const currentOwnsLatestAlias = React.useMemo(() => {"), "Budget widget computes when live current session owns latest alias");
-  assert(componentSource.includes("if (String(latestPersisted.sessionId ?? \"\") === currentSessionId) return false;"), "Budget widget keeps saved latest alias when current session is same persisted row");
-  assert(componentSource.includes("const latestTarget = index === 0 && !currentOwnsLatestAlias;"), "Budget widget blocks stale latest alias on saved rows when live current session owns latest");
   assert(componentSource.includes("const hasUnsavedCurrentSession = Boolean("), "Budget widget detects unsaved live current session");
   assert(componentSource.includes("currentAwaitingReply ? \"awaiting reply\" : \"unsaved current\""), "Budget widget derives live current state from transcript tail");
-  assert(componentSource.includes("currentOwnsLatestAlias ? \"latest live\" : null"), "Budget widget adds latest-live marker to unsaved current state when current owns latest alias");
+  assert(componentSource.includes("liveSessionShortcuts.currentOwnsLatestHistoryAlias ? \"latest live\" : null"), "Budget widget adds latest-live marker through shared live-session helper");
   assert(loopHookSource.includes("function applyProviderSelection(runtime: RuntimeContext, provider: string, model?: string)"), "Loop hook defines provider selection helper");
   assert(loopHookSource.includes("providerName: selectedProviderRef.current"), "Loop hook passes selected provider into AgentLoop config");
   assert(loopHookSource.includes("model: selectedModelRef.current"), "Loop hook passes selected model into AgentLoop config");
@@ -1282,15 +1684,8 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(loopHookSource.includes("recordHookEvent({"), "Loop hook records recent hook events into face state");
   assert(loopHookSource.includes("hooks: [recordRuntimeHook],"), "Loop hook attaches runtime hook recorder to AgentLoop instances");
   assert(loopHookSource.includes("supportedHookKinds: [...SUPPORTED_RUNTIME_HOOK_KINDS],"), "Loop hook exposes supported runtime hook kinds in runtime summary");
-  assert(componentSource.includes("const currentPendingAlias = currentAwaitingReply && newestInterruptedIndex === -1;"), "Budget widget only maps pending alias to live current session when no persisted pending target exists");
-  assert(componentSource.includes("const currentResumeHint = ["), "Budget widget builds live current resume alias set");
-  assert(componentSource.includes("currentOwnsLatestAlias ? \"/resume latest\" : null"), "Budget widget adds latest resume alias when live current owns latest");
-  assert(componentSource.includes("currentPendingAlias ? \"/resume pending\" : null"), "Budget widget adds pending resume alias when live current is only pending target");
-  assert(componentSource.includes("currentSessionId ? `/resume ${currentSessionId}` : null"), "Budget widget adds exact current session-id resume ref for live current row");
-  assert(componentSource.includes("const currentHistoryHint = ["), "Budget widget builds live current history alias set");
-  assert(componentSource.includes("currentOwnsLatestAlias ? \"/history latest 8\" : null"), "Budget widget adds latest history alias when live current owns latest");
-  assert(componentSource.includes("currentPendingAlias ? \"/history pending 8\" : null"), "Budget widget adds pending history alias when live current is only pending target");
-  assert(componentSource.includes("currentSessionId ? `/history ${currentSessionId} 8` : null"), "Budget widget adds exact current session-id history ref for live current row");
+  assert(componentSource.includes("const currentResumeHint = buildLiveCurrentResumeHint(liveSessionShortcuts);"), "Budget widget builds live current resume hint through shared session helper");
+  assert(componentSource.includes("const currentHistoryHint = buildLiveCurrentHistoryHint(liveSessionShortcuts, 8);"), "Budget widget builds live current history hint through shared session helper");
   assert(componentSource.includes("live. {currentSessionId.replace(/^ses_/, \"\")} | {currentMessageCount} msg | unsaved"), "Budget widget renders unsaved live current row");
   assert(componentSource.includes("{currentAgentId} | {normalizeCaste(currentCaste)} | live transcript"), "Budget widget surfaces live current identity truth");
   assert(componentSource.includes("started {currentStartedLabel} | last {currentLatestLabel}"), "Budget widget surfaces live current timing truth");
@@ -1298,18 +1693,14 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(componentSource.includes("Inspect: /cost | /cost models | /cost budget | /cost perf | /perf"), "Budget widget advertises cost and unified perf drill-down views");
   assert(componentSource.includes("use {currentResumeHint}"), "Budget widget surfaces live current resume alias set and controls for unsaved current session");
   assert(componentSource.includes("peek {currentHistoryHint}"), "Budget widget surfaces live current history alias set for unsaved current session");
-  assert(componentSource.includes("? `/resume ${session.sessionId} | /status | /cost | /clear`"), "Budget widget adds exact current session-id resume ref alongside live controls for current persisted row");
-  assert(componentSource.includes("? `/resume pending | /resume latest | ${resumeCommand} | /resume ${session.sessionId}`"), "Budget widget advertises both pending and latest resume aliases when newest interrupted session is also latest");
-  assert(componentSource.includes("? `/resume latest | ${resumeCommand} | /resume ${session.sessionId}`"), "Budget widget advertises /resume latest and direct session-id resume for newest clean session");
-  assert(componentSource.includes(": `${resumeCommand} | /resume ${session.sessionId}`;"), "Budget widget advertises direct session-id resume for other saved sessions");
-  assert(componentSource.includes("? `/history current 8 | /history ${session.sessionId} 8`"), "Budget widget adds exact current session-id history ref for current persisted row");
+  assert(componentSource.includes("const resumeHint = buildPersistedSessionResumeHint({"), "Budget widget builds persisted-session resume hints through shared helper");
+  assert(componentSource.includes("const historyHint = buildPersistedSessionHistoryHint({"), "Budget widget builds persisted-session history hints through shared helper");
   assert(componentSource.includes("session.interruption === \"interrupted_prompt\" ? \"awaiting reply\" : \"tool turn interrupted\""), "Budget widget uses canonical interrupted-turn label for persisted session rows");
   assert(componentSource.includes("{session.agentId} | {normalizeCaste(session.caste)} | {session.hasCheckpoint ? \"checkpoint\" : \"transcript-only\"}"), "Budget widget surfaces persisted session identity truth");
   assert(componentSource.includes("llm {session.provider ?? \"unknown\"}:{session.model ?? \"unknown\"}"), "Budget widget surfaces persisted session llm identity truth");
   assert(componentSource.includes("saved {session.savedAt} | last {session.lastMessageAt}"), "Budget widget surfaces persisted session timing truth");
   assert(componentSource.includes("cost ${session.costUsd.toFixed(4)} | tokens {session.tokensUsed.toLocaleString()}"), "Budget widget surfaces persisted session usage truth");
-  assert(componentSource.includes("? `/history pending 8 | /history latest 8 | ${historyCommand} 8 | /history ${session.sessionId} 8`"), "Budget widget advertises both pending and latest history aliases when newest interrupted session is also latest");
-  assert(componentSource.includes(": `${historyCommand} 8 | /history ${session.sessionId} 8`;"), "Budget widget advertises direct session-id history for other saved sessions");
+  assert(componentSource.includes("sessionCatalogIndex,"), "Budget widget passes session catalog index into persisted-session shortcut helper");
   assert(componentSource.includes("use {resumeHint}"), "Budget widget surfaces resume/control commands for recent sessions");
   assert(componentSource.includes("peek {historyHint}"), "Budget widget surfaces transcript peek commands for recent sessions");
   assert(appSource.includes("const currentAgentId = useColonyStore((state) => state.agentId);"), "App uses targeted selector for live current agent in session panel");
@@ -1333,6 +1724,7 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(componentSource.includes("redacted before persistence"), "Tool display surfaces redaction note for persisted output");
   assert(componentSource.includes("const structuredOutcome = output ? summarizeBuiltinToolOutput(toolName, args, output) : null;"), "Tool display derives structured summaries for builtin tool outputs");
   assert(componentSource.includes("const structuredError = approvalMessage || deniedResult || !error"), "Tool display derives structured summaries for builtin tool errors");
+  assert(componentSource.includes("const errorPreview = error ? summarizeTranscriptDisplayText(error, 600, 8) : null;"), "Tool display bounds raw error previews when no structured summary exists");
   assert(componentSource.includes("{structuredOutcome.headline}"), "Tool display surfaces structured outcome headline");
   assert(componentSource.includes("structuredOutcome.detailLines.map((line) => ("), "Tool display surfaces structured outcome detail lines");
   assert(componentSource.includes("{structuredError.headline}"), "Tool display surfaces structured error headline");
@@ -1347,14 +1739,20 @@ async function verifyApprovalUxGuards(): Promise<void> {
   assert(loopHookSource.includes("store.pendingCompactionStrategy === strategy"), "Manual compaction request checks for already-queued strategy");
   assert(loopHookSource.includes("if (announceQueuedStatus) {"), "Manual compaction hook can suppress duplicate queued-status chatter");
   assert(loopHookSource.includes("Context ${strategy} compaction already queued. It will run before the next LLM call."), "Manual compaction request reports already-queued strategy");
-  assert(loopHookSource.includes("Use /cancel, Ctrl+C, or Esc before starting another."), "Submit guard points to full active-run interrupt surface");
+  assert(loopHookSource.includes("currentStore.setThinkingState(true, statusLabel(event));"), "Loop hook uses guarded thinking-state setter during status updates");
+  assert(loopHookSource.includes("store.requestInterrupt(\"Stopping current operation...\");"), "Cancel path marks active run as stopping before loop teardown finishes");
+  assert(loopHookSource.includes("Cancellation requested. Finishing current operation..."), "Cancel path reports shutdown-in-progress instead of immediate completion");
+  assert(loopHookSource.includes("const queuedPromptQueueRef = useRef(createUserMessageQueue());"), "Loop hook keeps bounded queued prompt state");
+  assert(loopHookSource.includes("Queued next prompt"), "Loop hook reports queued follow-up prompts instead of dropping them");
+  assert(loopHookSource.includes("Starting queued prompt:"), "Loop hook drains queued prompt after active run finishes");
+  assert(loopHookSource.includes("queuePromptSubmission(trimmed);"), "Submit path routes overlap into queued prompt handling");
   assert(loopHookSource.includes("const startupBlockMessage = formatStartupBlockMessage(startupReportRef.current);"), "Submit path computes startup block message before run start");
   assert(loopHookSource.includes("stdinSupportsRawMode: typeof process.stdin.setRawMode === \"function\","), "Startup diagnostics capture raw-mode support from terminal runtime");
   assert(loopHookSource.includes("stdoutColumns: process.stdout.columns,"), "Startup diagnostics capture terminal viewport width from terminal runtime");
   assert(loopHookSource.includes("store.setError(startupBlockMessage);"), "Submit path records startup block as current error");
   assert(loopHookSource.includes("store.addMessage(\"error\", startupBlockMessage);"), "Submit path emits startup block into transcript");
   assert(loopHookSource.includes("store.setPendingCompactionStrategy(strategy);"), "Manual compaction request records queued strategy during active runs");
-  assert(loopHookSource.includes("Context compaction upgraded to reactive. It will run before the next LLM call."), "Manual compaction request can upgrade queued compaction to reactive");
+  assert(loopHookSource.includes("Context compaction upgraded to ${strategy}. It will run before the next LLM call."), "Manual compaction request can upgrade queued compaction to stronger strategies");
   assert(loopHookSource.includes("currentStore.setPendingCompactionStrategy(null);"), "Queued compaction state clears when compaction executes");
   assert(loopHookSource.includes("externalizedResult: event.externalized ? { ...event.externalized } : null"), "Loop hook forwards structured persisted-output metadata to the UI");
   assert(loopHookSource.includes("formatDeniedToolResultMessage({"), "Approval resolution transcript reuses shared structured denial formatter");
@@ -1383,15 +1781,21 @@ async function verifyApprovalUxGuards(): Promise<void> {
       },
     ],
   };
+  assertEqual(startupDoctorFocusCommand(blockingReport), "/doctor local", "Startup focus helper targets local runtime failures");
+  assertEqual(
+    startupDoctorInspectCommands(blockingReport).join(" | "),
+    "/doctor | /doctor local | /doctor errors | /doctor warnings | /doctor first-run",
+    "Startup inspect helper prioritizes focused doctor drill-downs",
+  );
   assertEqual(
     formatStartupPlaceholder(blockingReport),
-    "Startup blocked: Local provider | /doctor | /doctor errors",
-    "Startup placeholder focuses idle operator on doctor commands",
+    "Startup blocked: Local provider | /doctor local | /doctor first-run",
+    "Startup placeholder focuses idle operator on exact doctor commands",
   );
   assertEqual(
     formatStartupBlockMessage(blockingReport),
-    "Startup blocked: Local provider - Ollama did not respond at http://localhost:11434/api/tags.\nFix: Start Ollama or configure a ready cloud fallback.\nInspect: /doctor | /doctor errors",
-    "Startup block message includes primary fix and doctor drill-down",
+    "Startup blocked: Local provider - Ollama did not respond at http://localhost:11434/api/tags.\nFix: Start Ollama or configure a ready cloud fallback.\nInspect: /doctor | /doctor local | /doctor errors | /doctor warnings | /doctor first-run",
+    "Startup block message includes primary fix and focused doctor drill-down",
   );
   assertEqual(formatStartupPlaceholder(null), null, "Startup placeholder omitted when no report exists");
   assertEqual(formatStartupBlockMessage(null), null, "Startup block message omitted when no report exists");

@@ -653,6 +653,8 @@ function policyActionForTool(toolName: string): string {
   if (toolName === "file_list") return "tool.file.list";
   if (toolName === "file_edit") return "tool.file.edit";
   if (toolName === "grep_search") return "tool.search.grep";
+  if (toolName === "web_fetch") return "tool.web.fetch";
+  if (toolName === "web_search") return "tool.web.search";
   if (toolName === "http_request") return "tool.web.request";
   return `tool.${toolName}`;
 }

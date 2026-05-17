@@ -1,7 +1,7 @@
 import { Caste } from "../caste/enums";
 import { registerBuiltinTools } from "./builtin-tools";
 import { ToolPermissionChecker } from "./tool-permissions";
-import { ToolExecutor, ToolRegistry } from "./tools-registry";
+import { ToolExecutor, ToolRegistry, type ToolDefinition } from "./tools-registry";
 
 export interface RuntimeTooling {
   workspaceRoot: string;
@@ -35,7 +35,7 @@ export function buildRuntimeTooling(
   const activeToolIds = permittedToolIds;
   const toolCategories = new Map<string, string>();
   for (const tool of registry.listTools()) {
-    toolCategories.set(tool.toolId, loopCategory(tool.toolId, tool.category));
+    toolCategories.set(tool.toolId, deriveToolLoopCategory(tool));
   }
 
   return {
@@ -67,10 +67,14 @@ function getPermittedToolIds(
     .sort();
 }
 
-function loopCategory(toolId: string, category: string): string {
-  if (toolId === "file_read" || toolId === "file_list") return "read";
-  if (toolId === "grep_search") return "search";
-  if (category === "http") return "web";
-  if (category === "file") return "write";
-  return category;
+export function deriveToolLoopCategory(tool: ToolDefinition): string {
+  if (tool.metadata.concurrency === "parallel_safe") {
+    if (tool.metadata.search.indexed) return "search";
+    if (tool.metadata.readOnly) return tool.category === "http" ? "web" : "read";
+  }
+  if (tool.metadata.readOnly && tool.category === "file") return "read_exclusive";
+  if (tool.metadata.readOnly && tool.category === "http") return "web_exclusive";
+  if (tool.category === "file") return "write";
+  if (tool.category === "http") return "web";
+  return tool.category;
 }

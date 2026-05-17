@@ -5,9 +5,16 @@ export type CommandType =
   | "artifact"
   | "budget"
   | "model"
+  | "memory"
   | "perf"
   | "tools"
   | "events"
+  | "workflow"
+  | "daemon"
+  | "channels"
+  | "browser"
+  | "skills"
+  | "capabilities"
   | "cancel"
   | "clear"
   | "compact"
@@ -84,8 +91,9 @@ export function parseCommand(input: string): CommandIntent {
     return { type: "chat", args: [trimmed], raw };
   }
 
-  const parts = trimmed.slice(1).split(/\s+/);
-  const command = (parts[0] ?? "").toLowerCase();
+  const parts = shellSplit(trimmed);
+  const commandToken = parts[0] ?? "";
+  const command = (commandToken.startsWith("/") ? commandToken.slice(1) : commandToken).toLowerCase();
   const args = parts.slice(1);
 
   switch (command) {
@@ -96,8 +104,26 @@ export function parseCommand(input: string): CommandIntent {
       return { type: "budget", args, raw };
     case "tools":
       return { type: "tools", args, raw };
+    case "memory":
+      return { type: "memory", args, raw };
     case "events":
       return { type: "events", args, raw };
+    case "workflow":
+    case "workflows":
+      return { type: "workflow", args, raw };
+    case "daemon":
+      return { type: "daemon", args, raw };
+    case "channels":
+    case "channel":
+      return { type: "channels", args, raw };
+    case "browser":
+      return { type: "browser", args, raw };
+    case "skills":
+    case "skill":
+      return { type: "skills", args, raw };
+    case "capabilities":
+    case "capability":
+      return { type: "capabilities", args, raw };
     case "cancel":
       return { type: "cancel", args, raw };
     case "sessions":

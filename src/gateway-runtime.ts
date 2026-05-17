@@ -50,12 +50,14 @@ export interface GatewayStatusRuntimeSection {
   hasRuntime: boolean;
   selectedProvider?: string;
   selectedModel?: string;
+  memoryRecallLine?: string;
   provider?: string;
   model?: string;
   circuitState?: string;
   runActive?: boolean;
   interruptLine?: string;
   inspectLine?: string;
+  queuedPromptLine?: string;
   queuedCompactionLine?: string;
   observedHealthLine?: string;
   latestFailoverLine?: string;
@@ -64,6 +66,7 @@ export interface GatewayStatusRuntimeSection {
   hookInspectLine?: string;
   eventsLine?: string;
   eventsInspectLine?: string;
+  workflowLines?: string[];
   compactionHandoffLine?: string;
   perfInspectLine?: string;
   recoveryLines?: string[];
@@ -81,6 +84,7 @@ export interface GatewayStatusRuntimeSection {
   approvalLines?: string[];
   costSummaryLine?: string;
   budgetLines?: string[];
+  operatorActionLines?: string[];
 }
 
 export function statusInspectViews(): string {
@@ -239,12 +243,14 @@ export function renderStatusRuntimeSection(section: GatewayStatusRuntimeSection)
     lines.push("Runtime:");
     if (section.selectedProvider) lines.push(`Selected provider: ${section.selectedProvider}`);
     if (section.selectedModel) lines.push(`Selected model: ${section.selectedModel}`);
+    if (section.memoryRecallLine) lines.push(section.memoryRecallLine);
     lines.push(`Provider: ${section.provider ?? "unknown"}`);
     lines.push(`Model: ${section.model ?? "unknown"}`);
     lines.push(`Circuit: ${section.circuitState ?? "unknown"}`);
     lines.push(`Run active: ${section.runActive ? "yes" : "no"}`);
     if (section.interruptLine) lines.push(section.interruptLine);
     if (section.inspectLine) lines.push(section.inspectLine);
+    if (section.queuedPromptLine) lines.push(section.queuedPromptLine);
     if (section.queuedCompactionLine) lines.push(section.queuedCompactionLine);
     if (section.observedHealthLine) lines.push(section.observedHealthLine);
     if (section.latestFailoverLine) lines.push(section.latestFailoverLine);
@@ -259,6 +265,12 @@ export function renderStatusRuntimeSection(section: GatewayStatusRuntimeSection)
       lines.push("Recovery:");
       lines.push(...section.recoveryLines);
     }
+  }
+
+  if (section.workflowLines?.length) {
+    lines.push("");
+    lines.push("Workflows:");
+    lines.push(...section.workflowLines);
   }
 
   if (section.startupChecksLine) {
@@ -310,6 +322,11 @@ export function renderStatusRuntimeSection(section: GatewayStatusRuntimeSection)
     lines.push("");
     lines.push("Budget:");
     lines.push(...section.budgetLines);
+  }
+  if (section.operatorActionLines?.length) {
+    lines.push("");
+    lines.push("Operator Next:");
+    lines.push(...section.operatorActionLines);
   }
   return lines;
 }

@@ -444,7 +444,159 @@ async function verifyCompaction(): Promise<void> {
     messageCount: messages.length,
     caste: Caste.ASSIST_ANT,
   });
-  assertEqual(smartReactive.strategy, "reactive", "Smart compaction helper escalates to reactive when context blocks");
+  assertEqual(smartReactive.strategy, "context_collapse", "Smart compaction helper escalates to context_collapse when context blocks");
+
+  const sessionMemoryMessages: SerializedMessage[] = [
+    system,
+    serializeMessage(createUserMessage("Remember: use bun only and never npm for this repo.")),
+    serializeMessage(createAssistantMessage("Decision recorded. Budget cap stays at $5 and shell access stays conservative.")),
+    serializeMessage(createUserMessage("Keep the latest transcript messages untouched.")),
+    serializeMessage(createAssistantMessage("Latest answer stays verbatim.")),
+    serializeMessage(createUserMessage("One more fresh message.")),
+    serializeMessage(createAssistantMessage("Fresh reply.")),
+  ];
+  const sessionMemory = await new CompactionEngine({
+    caste: Caste.ASSIST_ANT,
+    preserveRecent: 2,
+  }).compact(sessionMemoryMessages, {
+    strategy: "session_memory",
+    force: true,
+    triggerSource: "manual",
+  });
+  assert(sessionMemory.compacted, "Session-memory compaction runs");
+  assertEqual(sessionMemory.strategyUsed, "session_memory", "Session-memory compaction records strategy");
+  assert(String(sessionMemory.messages[1]?.content ?? "").includes("Session Memories"), "Session-memory compaction injects memory block");
+  assert(String(sessionMemory.messages[1]?.content ?? "").includes("bun only"), "Session-memory compaction preserves durable constraint text");
+  assert(formatCompactionResult(sessionMemory).includes("session_memory"), "Session-memory format includes strategy label");
+
+  const cachedMicroMessages: SerializedMessage[] = [
+    {
+      type: "system",
+      content: "system prompt",
+      priority: 100,
+      timestamp: "2026-04-20T11:40:00.000Z",
+    },
+    {
+      type: "user",
+      content: "Trim stale tool output if the cache is cold.",
+      timestamp: "2026-04-20T11:41:00.000Z",
+    },
+    {
+      type: "tool_result",
+      toolCallId: "tool_cached_1",
+      name: "grep_search",
+      content: "match\n".repeat(1500),
+      isError: false,
+      timestamp: "2026-04-20T11:42:00.000Z",
+    },
+    {
+      type: "assistant",
+      content: "Captured the older grep output.",
+      timestamp: "2026-04-20T11:43:00.000Z",
+    },
+    {
+      type: "tool_result",
+      toolCallId: "tool_cached_2",
+      name: "file_read",
+      content: "row\n".repeat(1600),
+      isError: false,
+      timestamp: "2026-04-20T11:44:00.000Z",
+    },
+    {
+      type: "assistant",
+      content: "Latest assistant turn is old enough that the cache is cold now.",
+      timestamp: "2026-04-20T11:45:00.000Z",
+    },
+    {
+      type: "user",
+      content: "Keep the latest turn intact.",
+      timestamp: "2026-04-20T11:46:00.000Z",
+    },
+  ];
+  const cachedMicro = await new CompactionEngine({
+    caste: Caste.ASSIST_ANT,
+    preserveRecent: 2,
+    microResultChars: 1200,
+    cachedMicroIdleSeconds: 1,
+  }).compact(cachedMicroMessages, {
+    strategy: "cached_micro",
+    force: true,
+    triggerSource: "manual",
+  });
+  assert(cachedMicro.compacted, "Cached-micro compaction runs");
+  assertEqual(cachedMicro.strategyUsed, "cached_micro", "Cached-micro compaction records strategy");
+  assertEqual(cachedMicro.finalCount, cachedMicroMessages.length, "Cached-micro compaction preserves transcript shape");
+  assert(String(cachedMicro.messages[2]?.content ?? "").includes("trimmed by micro compaction"), "Cached-micro compaction trims stale tool content");
+  assert(formatCompactionResult(cachedMicro).includes("cached_micro"), "Cached-micro format includes strategy label");
+
+  const collapseMessages: SerializedMessage[] = [system, ...makeMessages(28)].map(serializeMessage);
+  const collapse = await new CompactionEngine({
+    caste: Caste.ASSIST_ANT,
+  }).compact(collapseMessages, {
+    strategy: "context_collapse",
+    currentUsageFraction: 0.92,
+    triggerSource: "manual",
+  });
+  assert(collapse.compacted, "Context-collapse compaction runs under extreme pressure");
+  assertEqual(collapse.strategyUsed, "context_collapse", "Context-collapse compaction records strategy");
+  assert(collapse.finalCount < reactive.finalCount, "Context-collapse preserves fewer messages than reactive");
+  assert(String(collapse.messages[1]?.content ?? "").includes("CONTEXT COLLAPSE"), "Context-collapse inserts collapse summary marker");
+  assert(formatCompactionResult(collapse).includes("context_collapse"), "Context-collapse format includes strategy label");
+
+  const smartCachedMicro = recommendCompaction({
+    contextUsage: {
+      usedTokens: 120_000,
+      maxTokens: 200_000,
+      remainingTokens: 80_000,
+      percentUsed: 60,
+      messageCount: cachedMicroMessages.length,
+      isAboveWarningThreshold: false,
+      isAboveAutoCompactThreshold: false,
+      isAtBlockingLimit: false,
+      compactionFailureCount: 0,
+    },
+    history: cachedMicroMessages,
+    messageCount: cachedMicroMessages.length,
+    caste: Caste.ASSIST_ANT,
+    cachedMicroIdleSeconds: 1,
+  });
+  assertEqual(smartCachedMicro.strategy, "cached_micro", "Smart compaction can pick cached_micro after cache-cold idle time");
+
+  const smartSessionMemory = recommendCompaction({
+    contextUsage: {
+      usedTokens: 164_000,
+      maxTokens: 200_000,
+      remainingTokens: 36_000,
+      percentUsed: 82,
+      messageCount: sessionMemoryMessages.length,
+      isAboveWarningThreshold: true,
+      isAboveAutoCompactThreshold: true,
+      isAtBlockingLimit: false,
+      compactionFailureCount: 0,
+    },
+    history: sessionMemoryMessages,
+    messageCount: sessionMemoryMessages.length,
+    caste: Caste.ASSIST_ANT,
+  });
+  assertEqual(smartSessionMemory.strategy, "session_memory", "Smart compaction can preserve memories before summary compaction");
+
+  const smartCollapse = recommendCompaction({
+    contextUsage: {
+      usedTokens: 184_000,
+      maxTokens: 200_000,
+      remainingTokens: 16_000,
+      percentUsed: 92,
+      messageCount: collapseMessages.length,
+      isAboveWarningThreshold: true,
+      isAboveAutoCompactThreshold: true,
+      isAtBlockingLimit: false,
+      compactionFailureCount: 0,
+    },
+    history: collapseMessages,
+    messageCount: collapseMessages.length,
+    caste: Caste.ASSIST_ANT,
+  });
+  assertEqual(smartCollapse.strategy, "context_collapse", "Smart compaction escalates to context_collapse under extreme pressure");
 
   const tracker = new ContextWindowTracker({ maxTokens: 100 });
   const snapshot = tracker.snapshot(messages);

@@ -1339,6 +1339,7 @@ export class AgentLoop {
         typeof base?.selectedModel === "string"
           ? base.selectedModel
           : resolvedModel,
+      memoryTruthModeOverride: base?.memoryTruthModeOverride ?? null,
       circuitState: resolvedCircuit,
       availableProviders:
         base?.availableProviders?.length

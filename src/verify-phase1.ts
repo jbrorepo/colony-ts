@@ -55,7 +55,6 @@ import {
 } from "./manifesto/manifesto";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { randomBytes } from "crypto";
 
 // ---------------------------------------------------------------------------
@@ -134,7 +133,7 @@ function verifySettings(): void {
 async function verifyVault(): Promise<void> {
   section("2. Vault — AES-256-GCM Encryption");
 
-  const testDir = join(homedir(), ".colony", "test-vault");
+  const testDir = join(process.cwd(), ".tmp-verify-phase1-vault");
   if (!existsSync(testDir)) mkdirSync(testDir, { recursive: true });
   const testFile = join(testDir, `test-${Date.now()}.vault`);
 

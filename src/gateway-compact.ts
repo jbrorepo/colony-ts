@@ -1,4 +1,8 @@
-import type { CompactionStrategy } from "./runtime/compaction";
+import {
+  isCompactionUpgrade,
+  normalizeCompactionStrategy,
+  type CompactionStrategy,
+} from "./runtime/compaction";
 
 export interface GatewayCompactEvent {
   strategy: string;
@@ -106,7 +110,7 @@ export function appendLastCompactionDetails(
   if (!lastCompaction.compacted) return;
 
   lines.push(`Preserved: ${lastCompaction.preservedSystemCount ?? 0} system + ${lastCompaction.preservedRecentCount ?? 0} recent`);
-  if (lastCompaction.strategyUsed === "micro") {
+  if (lastCompaction.strategyUsed === "micro" || lastCompaction.strategyUsed === "cached_micro") {
     lines.push(`Micro: trimmed ${lastCompaction.summarizedMessageCount ?? 0} older tool results in place`);
     return;
   }
@@ -124,7 +128,7 @@ export function appendLastCompactionFailureDetails(
 }
 
 export function renderCompactUsage(): string {
-  return "Usage: /compact [standard|micro|reactive|smart|status|recent|handoff]\n\nUse /compact status to inspect pressure, /compact recent for recent compaction history, /compact handoff for compaction-memory bridge status, /compact for normal cleanup, /compact smart for current best move, /compact micro to trim stale tool output in place, or /compact reactive for aggressive overflow recovery.";
+  return "Usage: /compact [standard|micro|reactive|session_memory|cached_micro|context_collapse|smart|status|recent|handoff]\n\nUse /compact status to inspect pressure, /compact recent for recent compaction history, /compact handoff for compaction-memory bridge status, /compact for normal cleanup, /compact smart for current best move, /compact session_memory to preserve durable constraints before summarizing, /compact cached_micro to clear stale tool output after idle cache-cold gaps, /compact micro to trim stale tool output in place, /compact reactive for aggressive overflow recovery, or /compact context_collapse for extreme-pressure collapse.";
 }
 
 export function renderCompactHandoffView(
@@ -287,7 +291,7 @@ export function buildCompactCommandPayload(opts: {
   if (rawStrategy === "status") {
     if (opts.args.length > 1) {
       return {
-        output: "Usage: /compact [standard|micro|reactive|smart|status|recent|handoff]",
+        output: "Usage: /compact [standard|micro|reactive|session_memory|cached_micro|context_collapse|smart|status|recent|handoff]",
         isError: true,
       };
     }
@@ -330,12 +334,13 @@ export function buildCompactCommandPayload(opts: {
     };
   }
 
+  const normalizedStrategy = normalizeCompactionStrategy(rawStrategy);
   const requestedStrategy =
     rawStrategy === ""
       ? "standard"
-      : rawStrategy === "standard" || rawStrategy === "reactive" || rawStrategy === "micro" || rawStrategy === "smart"
-        ? rawStrategy
-        : null;
+      : rawStrategy === "smart"
+        ? "smart"
+        : normalizedStrategy;
 
   if (!requestedStrategy || opts.args.length > 1) {
     return {
@@ -383,6 +388,7 @@ export function buildCompactCommandPayload(opts: {
 
   const queued = opts.queuedStrategy ?? null;
   if (opts.activeRun && queued) {
+    const normalizedQueued = normalizeCompactionStrategy(queued);
     if (queued === strategy) {
       return {
         output: `Context compaction already queued (${queued}).\nIt will run before the next loop iteration.`,
@@ -396,9 +402,9 @@ export function buildCompactCommandPayload(opts: {
         },
       };
     }
-    if (queued === "reactive" && strategy !== "reactive") {
+    if (normalizedQueued && !isCompactionUpgrade(normalizedQueued, strategy)) {
       return {
-        output: "Reactive context compaction already queued.\nIt will run before the next loop iteration.",
+        output: `${queued} context compaction already queued.\nIt will run before the next loop iteration.`,
         data: {
           action: "compact",
           messageCount: opts.messageCount,

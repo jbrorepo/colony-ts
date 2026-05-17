@@ -11,11 +11,38 @@ import type { SerializedMessage } from "./message";
 import { TokenEstimationService } from "./token-estimation";
 import { parsePersistedToolResultMessage } from "./tool-result-storage";
 
-export type CompactionStrategy = "standard" | "reactive" | "micro";
+export type CompactionStrategy =
+  | "standard"
+  | "reactive"
+  | "micro"
+  | "session_memory"
+  | "cached_micro"
+  | "context_collapse";
 export type CompactionTrigger = "auto_threshold" | "manual" | "reactive_overflow" | "none";
 
 const DEFAULT_PRESERVE_RECENT = 10;
 export const DEFAULT_MICRO_COMPACT_RESULT_CHARS = 4_000;
+const DEFAULT_SESSION_MEMORY_TRIGGER = 0.75;
+const DEFAULT_CACHED_MICRO_IDLE_SECONDS = 300;
+const DEFAULT_CONTEXT_COLLAPSE_SNAPSHOT_THRESHOLD = 0.85;
+const DEFAULT_CONTEXT_COLLAPSE_BLOCKING_THRESHOLD = 0.90;
+const DEFAULT_CONTEXT_COLLAPSE_PRESERVE_RECENT = 4;
+const SESSION_MEMORY_KEYWORDS = [
+  "remember",
+  "preference",
+  "prefer",
+  "always",
+  "never",
+  "must",
+  "requirement",
+  "constraint",
+  "budget",
+  "decision",
+  "decided",
+  "path",
+  "command",
+  "provider",
+];
 const CASTE_PRESERVE_MAP: Record<string, number> = {
   [Caste.ROOT_QUEEN]: 20,
   [Caste.ASSIST_ANT]: 12,
@@ -38,6 +65,11 @@ export interface CompactionConfig {
   reactivePreserveRecent: number;
   microPreserveRecent: number;
   microResultChars: number;
+  sessionMemoryTriggerThreshold: number;
+  cachedMicroIdleSeconds: number;
+  contextCollapseSnapshotThreshold: number;
+  contextCollapseBlockingThreshold: number;
+  contextCollapsePreserveRecent: number;
 }
 
 export interface CompactionResult {
@@ -87,6 +119,42 @@ export interface CompactionRecommendation {
   microTokensSavedEstimate: number;
 }
 
+const COMPACTION_STRATEGY_RANK: Record<CompactionStrategy, number> = {
+  micro: 1,
+  cached_micro: 2,
+  standard: 3,
+  session_memory: 4,
+  reactive: 5,
+  context_collapse: 6,
+};
+
+export function normalizeCompactionStrategy(
+  strategy?: CompactionStrategy | string | null,
+): CompactionStrategy | null {
+  if (
+    strategy === "standard"
+    || strategy === "reactive"
+    || strategy === "micro"
+    || strategy === "session_memory"
+    || strategy === "cached_micro"
+    || strategy === "context_collapse"
+  ) {
+    return strategy;
+  }
+  return null;
+}
+
+export function compactionStrategyRank(strategy: CompactionStrategy): number {
+  return COMPACTION_STRATEGY_RANK[strategy];
+}
+
+export function isCompactionUpgrade(
+  current: CompactionStrategy,
+  requested: CompactionStrategy,
+): boolean {
+  return compactionStrategyRank(requested) > compactionStrategyRank(current);
+}
+
 export function preserveRecentForCaste(caste: Caste | string): number {
   const key = String(caste).toLowerCase().replace(/\s+/g, "_");
   return CASTE_PRESERVE_MAP[key] ?? DEFAULT_PRESERVE_RECENT;
@@ -113,12 +181,32 @@ export function formatCompactionResult(result: CompactionResult): string {
     return `Compaction not needed (${result.strategyUsed}, ${trigger}, before ${beforePct}).`;
   }
 
-  if (result.strategyUsed === "micro") {
+  if (result.strategyUsed === "micro" || result.strategyUsed === "cached_micro") {
     return [
-      `Compaction micro via ${trigger}.`,
+      `Compaction ${result.strategyUsed} via ${trigger}.`,
       `Saved ~${result.tokensSavedEstimate} tokens.`,
-      `Trimmed ${result.summarizedMessageCount} older tool results in place.`,
+      result.strategyUsed === "cached_micro"
+        ? `Trimmed ${result.summarizedMessageCount} stale tool results with cache-aware micro cleanup.`
+        : `Trimmed ${result.summarizedMessageCount} older tool results in place.`,
       `Preserved transcript shape with ${result.preservedSystemCount} system + ${result.preservedRecentCount} recent messages.`,
+    ].join(" ");
+  }
+
+  if (result.strategyUsed === "session_memory") {
+    return [
+      `Compaction session_memory via ${trigger}.`,
+      `Saved ~${result.tokensSavedEstimate} tokens.`,
+      `Preserved ${result.preservedSystemCount} system + ${result.preservedRecentCount} recent messages.`,
+      `Promoted memory-worthy context before summarizing ${result.summarizedMessageCount} older messages from ${beforePct} context usage.`,
+    ].join(" ");
+  }
+
+  if (result.strategyUsed === "context_collapse") {
+    return [
+      `Compaction context_collapse via ${trigger}.`,
+      `Saved ~${result.tokensSavedEstimate} tokens.`,
+      `Collapsed ${result.summarizedMessageCount} older messages under extreme pressure from ${beforePct} context usage.`,
+      `Preserved ${result.preservedSystemCount} system + ${result.preservedRecentCount} recent messages.`,
     ].join(" ");
   }
 
@@ -149,6 +237,11 @@ export function createCompactionConfig(
     reactivePreserveRecent: opts.reactivePreserveRecent ?? 6,
     microPreserveRecent: opts.microPreserveRecent ?? 2,
     microResultChars: opts.microResultChars ?? DEFAULT_MICRO_COMPACT_RESULT_CHARS,
+    sessionMemoryTriggerThreshold: opts.sessionMemoryTriggerThreshold ?? DEFAULT_SESSION_MEMORY_TRIGGER,
+    cachedMicroIdleSeconds: opts.cachedMicroIdleSeconds ?? DEFAULT_CACHED_MICRO_IDLE_SECONDS,
+    contextCollapseSnapshotThreshold: opts.contextCollapseSnapshotThreshold ?? DEFAULT_CONTEXT_COLLAPSE_SNAPSHOT_THRESHOLD,
+    contextCollapseBlockingThreshold: opts.contextCollapseBlockingThreshold ?? DEFAULT_CONTEXT_COLLAPSE_BLOCKING_THRESHOLD,
+    contextCollapsePreserveRecent: opts.contextCollapsePreserveRecent ?? DEFAULT_CONTEXT_COLLAPSE_PRESERVE_RECENT,
   };
 }
 
@@ -193,12 +286,16 @@ export function recommendCompaction(
     caste?: Caste | string;
     microPreserveRecent?: number;
     microResultChars?: number;
+    cachedMicroIdleSeconds?: number;
   } = {},
 ): CompactionRecommendation {
-  const queuedStrategy = normalizeQueuedCompactionStrategy(opts.pendingStrategy);
+  const queuedStrategy = normalizeCompactionStrategy(opts.pendingStrategy);
   const contextUsage = opts.contextUsage ?? null;
   const history = opts.history ?? [];
   const messageCount = opts.messageCount ?? history.length;
+  const percentUsed = typeof contextUsage?.percentUsed === "number"
+    ? contextUsage.percentUsed
+    : 0;
   const pressure =
     contextUsage?.isAtBlockingLimit
       ? "blocking"
@@ -219,6 +316,8 @@ export function recommendCompaction(
         preserveRecentCount: 0,
       };
   const microUseful = microOpportunity.candidateCount > 0;
+  const memoryHighlights = extractSessionMemories(history);
+  const cacheCold = isCachedMicroIdle(history, opts.cachedMicroIdleSeconds ?? DEFAULT_CACHED_MICRO_IDLE_SECONDS);
 
   if (queuedStrategy) {
     return {
@@ -226,6 +325,17 @@ export function recommendCompaction(
       reason: `${queuedStrategy} compaction already queued for the next loop iteration`,
       pressure,
       queuedStrategy,
+      microCandidateCount: microOpportunity.candidateCount,
+      microTokensSavedEstimate: microOpportunity.tokensSavedEstimate,
+    };
+  }
+
+  if (percentUsed >= 90) {
+    return {
+      strategy: "context_collapse",
+      reason: `context is at ${percentUsed.toFixed(1)}% and needs extreme-pressure collapse`,
+      pressure,
+      queuedStrategy: null,
       microCandidateCount: microOpportunity.candidateCount,
       microTokensSavedEstimate: microOpportunity.tokensSavedEstimate,
     };
@@ -260,14 +370,26 @@ export function recommendCompaction(
       const projectedPercent = (projectedUsedTokens / contextUsage.maxTokens) * 100;
       if (projectedPercent < 80) {
         return {
-          strategy: "micro",
-          reason: `${microOpportunity.candidateCount} older tool results can likely drop pressure below the auto threshold`,
+          strategy: cacheCold ? "cached_micro" : "micro",
+          reason: cacheCold
+            ? `${microOpportunity.candidateCount} stale tool results can be cleared after idle time without a full summary pass`
+            : `${microOpportunity.candidateCount} older tool results can likely drop pressure below the auto threshold`,
           pressure,
           queuedStrategy: null,
           microCandidateCount: microOpportunity.candidateCount,
           microTokensSavedEstimate: microOpportunity.tokensSavedEstimate,
         };
       }
+    }
+    if (memoryHighlights.length > 0) {
+      return {
+        strategy: "session_memory",
+        reason: `${memoryHighlights.length} memory-worthy constraints or decisions should survive the next compaction`,
+        pressure,
+        queuedStrategy: null,
+        microCandidateCount: microOpportunity.candidateCount,
+        microTokensSavedEstimate: microOpportunity.tokensSavedEstimate,
+      };
     }
     const thresholdPercent =
       typeof contextUsage.percentUsed === "number"
@@ -287,6 +409,28 @@ export function recommendCompaction(
     return {
       strategy: "reactive",
       reason: `${contextUsage.compactionFailureCount} prior compaction failure(s) under warning pressure`,
+      pressure,
+      queuedStrategy: null,
+      microCandidateCount: microOpportunity.candidateCount,
+      microTokensSavedEstimate: microOpportunity.tokensSavedEstimate,
+    };
+  }
+
+  if (cacheCold && microUseful) {
+    return {
+      strategy: "cached_micro",
+      reason: `${microOpportunity.candidateCount} stale tool results are safe to clear after cache-cold idle time`,
+      pressure,
+      queuedStrategy: null,
+      microCandidateCount: microOpportunity.candidateCount,
+      microTokensSavedEstimate: microOpportunity.tokensSavedEstimate,
+    };
+  }
+
+  if (memoryHighlights.length > 0 && pressure !== "ok" && messageCount > 16) {
+    return {
+      strategy: "session_memory",
+      reason: `${memoryHighlights.length} durable constraints or decisions should be preserved before normal summarization`,
       pressure,
       queuedStrategy: null,
       microCandidateCount: microOpportunity.candidateCount,
@@ -408,10 +552,34 @@ export class CompactionEngine {
         opts.triggerSource ?? (opts.force ? "manual" : "auto_threshold"),
       );
     }
+    if (strategy === "cached_micro") {
+      return this._compactCachedMicro(
+        messages,
+        opts.currentUsageFraction ?? 0,
+        opts.force ?? false,
+        opts.triggerSource ?? (opts.force ? "manual" : "auto_threshold"),
+      );
+    }
     if (strategy === "reactive") {
       return this._compactReactive(
         messages,
         opts.triggerSource ?? "reactive_overflow",
+      );
+    }
+    if (strategy === "session_memory") {
+      return this._compactSessionMemory(
+        messages,
+        opts.currentUsageFraction ?? 0,
+        opts.force ?? false,
+        opts.triggerSource ?? (opts.force ? "manual" : "auto_threshold"),
+      );
+    }
+    if (strategy === "context_collapse") {
+      return this._compactContextCollapse(
+        messages,
+        opts.currentUsageFraction ?? 0,
+        opts.force ?? false,
+        opts.triggerSource ?? (opts.force ? "manual" : "auto_threshold"),
       );
     }
     return this._compactStandard(
@@ -577,6 +745,187 @@ export class CompactionEngine {
     };
   }
 
+  private async _compactSessionMemory(
+    messages: SerializedMessage[],
+    currentUsageFraction: number,
+    force: boolean,
+    triggerSource: CompactionTrigger,
+  ): Promise<CompactionResultInternal> {
+    const originalCount = messages.length;
+    if (!force && currentUsageFraction < this._config.sessionMemoryTriggerThreshold) {
+      return this._noCompaction(messages, "session_memory", {
+        triggerSource,
+        usageBeforeFraction: currentUsageFraction,
+      });
+    }
+
+    const { systemMessages, bodyMessages } = splitSystemPrefix(messages);
+    const preserveCount = Math.min(this._config.preserveRecent, bodyMessages.length);
+    if (bodyMessages.length <= preserveCount + 1) {
+      return this._noCompaction(messages, "session_memory", {
+        triggerSource,
+        usageBeforeFraction: currentUsageFraction,
+      });
+    }
+
+    const older = bodyMessages.slice(0, bodyMessages.length - preserveCount);
+    const recent = bodyMessages.slice(bodyMessages.length - preserveCount);
+    const summary = this._heuristicSummary(older);
+    const memories = extractSessionMemories(older);
+    const compacted: SerializedMessage[] = [...systemMessages];
+
+    if (memories.length > 0) {
+      compacted.push(
+        makeSystemSummary(
+          `[Session Memories - preserved across compaction]\n\n${memories.map((memory) => `- ${memory}`).join("\n")}`,
+        ),
+      );
+    }
+    compacted.push(
+      makeSystemSummary(`[Context Summary - ${older.length} earlier messages compacted]\n\n${summary}`),
+    );
+    compacted.push(...recent);
+
+    return {
+      compacted: true,
+      originalCount,
+      finalCount: compacted.length,
+      summary,
+      tokensSavedEstimate: Math.max(0, Math.floor((
+        estimateMessageChars(older)
+        - (
+          summary.length
+          + memories.reduce((total, memory) => total + memory.length, 0)
+        )
+      ) / 4)),
+      messages: compacted,
+      strategyUsed: "session_memory",
+      triggerSource,
+      usageBeforeFraction: currentUsageFraction,
+      preservedSystemCount: systemMessages.length + (memories.length > 0 ? 1 : 0),
+      preservedRecentCount: recent.length,
+      summarizedMessageCount: older.length,
+      summaryLineCount: countSummaryLines(summary) + memories.length,
+      compactedMessages: older,
+    };
+  }
+
+  private async _compactCachedMicro(
+    messages: SerializedMessage[],
+    currentUsageFraction: number,
+    force: boolean,
+    triggerSource: CompactionTrigger,
+  ): Promise<CompactionResultInternal> {
+    const originalCount = messages.length;
+    const cacheCold = isCachedMicroIdle(messages, this._config.cachedMicroIdleSeconds);
+    if (!force && currentUsageFraction < this._config.triggerThreshold && !cacheCold) {
+      return this._noCompaction(messages, "cached_micro", {
+        triggerSource,
+        usageBeforeFraction: currentUsageFraction,
+      });
+    }
+
+    const { systemMessages, bodyMessages } = splitSystemPrefix(messages);
+    const preserveCount = Math.min(this._config.microPreserveRecent, bodyMessages.length);
+    const olderCount = Math.max(bodyMessages.length - preserveCount, 0);
+    const older = bodyMessages.slice(0, olderCount);
+    const recent = bodyMessages.slice(olderCount);
+
+    let trimmedCount = 0;
+    let tokensSavedEstimate = 0;
+    const compactedMessages: SerializedMessage[] = [];
+    const compactedOlder = older.map((message) => {
+      const next = microCompactMessage(message, this._config.microResultChars);
+      if (!next) return message;
+      trimmedCount += 1;
+      tokensSavedEstimate += next.tokensSavedEstimate;
+      compactedMessages.push({ ...message });
+      return next.message;
+    });
+
+    if (trimmedCount === 0) {
+      return this._noCompaction(messages, "cached_micro", {
+        triggerSource,
+        usageBeforeFraction: currentUsageFraction,
+      });
+    }
+
+    const summary = cacheCold
+      ? `Cache-cold cleanup trimmed ${trimmedCount} stale tool results after idle time.`
+      : `Cache-aware cleanup trimmed ${trimmedCount} stale tool results without a full summary pass.`;
+    return {
+      compacted: true,
+      originalCount,
+      finalCount: messages.length,
+      summary,
+      tokensSavedEstimate,
+      messages: [...systemMessages, ...compactedOlder, ...recent],
+      strategyUsed: "cached_micro",
+      triggerSource,
+      usageBeforeFraction: currentUsageFraction,
+      preservedSystemCount: systemMessages.length,
+      preservedRecentCount: recent.length,
+      summarizedMessageCount: trimmedCount,
+      summaryLineCount: countSummaryLines(summary),
+      compactedMessages,
+    };
+  }
+
+  private async _compactContextCollapse(
+    messages: SerializedMessage[],
+    currentUsageFraction: number,
+    force: boolean,
+    triggerSource: CompactionTrigger,
+  ): Promise<CompactionResultInternal> {
+    const originalCount = messages.length;
+    if (
+      !force
+      && currentUsageFraction < this._config.contextCollapseBlockingThreshold
+    ) {
+      return this._noCompaction(messages, "context_collapse", {
+        triggerSource,
+        usageBeforeFraction: currentUsageFraction,
+      });
+    }
+
+    const { systemMessages, bodyMessages } = splitSystemPrefix(messages);
+    const preserveCount = Math.min(this._config.contextCollapsePreserveRecent, bodyMessages.length);
+    if (bodyMessages.length <= preserveCount + 1) {
+      return this._noCompaction(messages, "context_collapse", {
+        triggerSource,
+        usageBeforeFraction: currentUsageFraction,
+      });
+    }
+
+    const older = bodyMessages.slice(0, bodyMessages.length - preserveCount);
+    const recent = bodyMessages.slice(bodyMessages.length - preserveCount);
+    const summary = this._collapseSummary(older);
+    const compacted: SerializedMessage[] = [
+      ...systemMessages,
+      makeSystemSummary(
+        `[CONTEXT COLLAPSE - ${older.length} messages collapsed at ${(currentUsageFraction * 100).toFixed(0)}% capacity]\n\n${summary}`,
+      ),
+      ...recent,
+    ];
+
+    return {
+      compacted: true,
+      originalCount,
+      finalCount: compacted.length,
+      summary,
+      tokensSavedEstimate: estimateTokensSaved(older, summary),
+      messages: compacted,
+      strategyUsed: "context_collapse",
+      triggerSource,
+      usageBeforeFraction: currentUsageFraction,
+      preservedSystemCount: systemMessages.length,
+      preservedRecentCount: recent.length,
+      summarizedMessageCount: older.length,
+      summaryLineCount: countSummaryLines(summary),
+      compactedMessages: older,
+    };
+  }
+
   private _noCompaction(
     messages: SerializedMessage[],
     strategy: CompactionStrategy,
@@ -628,6 +977,20 @@ export class CompactionEngine {
     if (userMessages.length === 0) return "(Previous context was emergency-compacted.)";
     return `Key user requests from compacted context:\n${userMessages.join("\n")}`;
   }
+
+  private _collapseSummary(messages: SerializedMessage[]): string {
+    const recentHighlights = messages
+      .filter((message) => (message.type === "user" || message.type === "assistant") && message.content)
+      .slice(-8)
+      .map((message) => {
+        const prefix = message.type === "user" ? "User" : "Assistant";
+        return `- ${prefix}: ${String(message.content).trim().slice(0, 120)}`;
+      });
+    if (recentHighlights.length === 0) {
+      return "(Context collapsed under extreme pressure.)";
+    }
+    return recentHighlights.join("\n");
+  }
 }
 
 function estimateMicroCompactionSavings(
@@ -666,15 +1029,6 @@ function microCompactContent(content: string, maxChars: number): string {
   const headChars = Math.max(1, Math.floor(retainedBudget * 0.75));
   const tailChars = Math.max(1, retainedBudget - headChars);
   return `${content.slice(0, headChars)}${marker}${content.slice(-tailChars)}`;
-}
-
-function normalizeQueuedCompactionStrategy(
-  strategy?: CompactionStrategy | string | null,
-): CompactionStrategy | null {
-  if (strategy === "standard" || strategy === "reactive" || strategy === "micro") {
-    return strategy;
-  }
-  return null;
 }
 
 export function applyCompactionToSession(
@@ -736,4 +1090,39 @@ function countSummaryLines(summary: string): number {
   const trimmed = summary.trim();
   if (!trimmed) return 0;
   return trimmed.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
+}
+
+function extractSessionMemories(messages: SerializedMessage[]): string[] {
+  const memories: string[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    if (message.type !== "user" && message.type !== "assistant") continue;
+    const content = String(message.content ?? "").replace(/\s+/g, " ").trim();
+    if (!content) continue;
+    const lower = content.toLowerCase();
+    if (!SESSION_MEMORY_KEYWORDS.some((keyword) => lower.includes(keyword))) continue;
+    const normalized = lower.slice(0, 180);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    memories.push(`${message.type === "user" ? "User" : "Assistant"}: ${content.slice(0, 180)}`);
+    if (memories.length >= 6) break;
+  }
+  return memories;
+}
+
+function isCachedMicroIdle(
+  messages: SerializedMessage[],
+  idleSeconds: number,
+): boolean {
+  const latestAssistantMs = [...messages]
+    .reverse()
+    .map((message) => parseMessageTimestampMs(message))
+    .find((timestamp): timestamp is number => typeof timestamp === "number");
+  if (typeof latestAssistantMs !== "number") return false;
+  return (Date.now() - latestAssistantMs) >= idleSeconds * 1000;
+}
+
+function parseMessageTimestampMs(message: SerializedMessage): number | null {
+  const parsed = Date.parse(String(message.timestamp ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
 }

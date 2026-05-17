@@ -1,6 +1,11 @@
 import { readdir, stat } from "fs/promises";
 import { isAbsolute, join, relative, resolve } from "path";
 
+import type { MemoryTruthMode } from "./memory/hybrid-memory";
+import type {
+  SwarmExecutionMode,
+  SwarmStage,
+} from "./orchestrator";
 import {
   filterHistoryExcerpt,
   formatSessionHistoryExcerpt,
@@ -199,6 +204,7 @@ async function loadLatestPersistedArtifactView(sessionId: string): Promise<Comma
 
 export interface CommandExecutionHandlers {
   submitChat: (message: string) => Promise<void> | void;
+  queueChat?: (message: string) => Promise<void> | void;
   exitApp: () => void;
   resetSession: () => void;
   requestCompaction: (
@@ -207,6 +213,20 @@ export interface CommandExecutionHandlers {
   ) => Promise<unknown> | void;
   setBudgetCap: (maxUsd: number) => void;
   setProviderSelection?: (provider: string, model?: string) => Promise<void> | void;
+  setMemoryTruthMode?: (mode: MemoryTruthMode | null) => Promise<void> | void;
+  startSwarm?: (
+    objective: string,
+    executionMode?: SwarmExecutionMode,
+  ) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  cancelSwarm?: (runId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  resumeSwarm?: (runId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  retrySwarmStage?: (
+    runId: string,
+    stage: SwarmStage,
+  ) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestExternalChannelRegistration?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestExternalChannelWebhookRegistration?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestExternalChannelSubscriptionSetup?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   showArtifactCatalog?: (
     sessionId: string,
     latest?: boolean,
@@ -218,6 +238,23 @@ export interface CommandExecutionHandlers {
   resumeSession?: (sessionId: string) => Promise<void> | void;
   loadSessionHistory?: (sessionId: string, count: number) => Promise<SessionHistoryExcerpt | null>;
   isRunActive?: () => boolean;
+  isRunCancelling?: () => boolean;
+}
+
+function emitOptionalCommandResult(
+  value: string | CommandResult | void,
+  handlers: CommandExecutionHandlers,
+): void {
+  if (!value) return;
+  if (typeof value === "string") {
+    handlers.showSystemMessage(value);
+    return;
+  }
+  if (value.isError) {
+    handlers.showErrorMessage(value.output);
+  } else {
+    handlers.showSystemMessage(value.output);
+  }
 }
 
 export async function executeCommand(
@@ -232,6 +269,7 @@ export async function executeCommand(
   }
 
   const runActive = handlers.isRunActive?.() ?? false;
+  const runCancelling = handlers.isRunCancelling?.() ?? false;
   const action = command.action ?? { kind: "display" as const };
   const tryExitApp = (): void => {
     try {
@@ -249,13 +287,26 @@ export async function executeCommand(
       return true;
 
     case "submit":
-      if (command.command === "swarm" && command.output) {
-        handlers.showSystemMessage(command.output);
+      if (runCancelling) {
+        handlers.showSystemMessage(
+          "Cannot submit a new request while the current Colony run is stopping. Wait for idle, then try again.",
+        );
+        return true;
       }
       if (runActive) {
-        handlers.showSystemMessage(
-          "Cannot submit a new request while a Colony run is active. Use /cancel, Ctrl+C, or Esc first.",
-        );
+        if (!handlers.queueChat) {
+          handlers.showSystemMessage(
+            "Cannot submit a new request while a Colony run is active. Use /cancel, Ctrl+C, or Esc first.",
+          );
+          return true;
+        }
+        try {
+          await handlers.queueChat(action.message);
+        } catch (error) {
+          handlers.showErrorMessage(
+            `Failed to queue request: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
         return true;
       }
       try {
@@ -263,6 +314,115 @@ export async function executeCommand(
       } catch (error) {
         handlers.showErrorMessage(
           `Failed to submit request: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return true;
+
+    case "start_swarm":
+      if (!handlers.startSwarm) {
+        handlers.showErrorMessage("Swarm orchestration is not available in this runtime.");
+        return true;
+      }
+      handlers.showSystemMessage(command.output);
+      try {
+        const started = await handlers.startSwarm(action.objective, action.executionMode);
+        emitOptionalCommandResult(started, handlers);
+      } catch (error) {
+        handlers.showErrorMessage(
+          `Failed to start swarm: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return true;
+
+    case "resume_swarm":
+      if (!handlers.resumeSwarm) {
+        handlers.showErrorMessage("Swarm resume is not available in this runtime.");
+        return true;
+      }
+      handlers.showSystemMessage(command.output);
+      try {
+        const resumed = await handlers.resumeSwarm(action.runId);
+        emitOptionalCommandResult(resumed, handlers);
+      } catch (error) {
+        handlers.showErrorMessage(
+          `Failed to resume swarm ${action.runId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return true;
+
+    case "retry_swarm_stage":
+      if (!handlers.retrySwarmStage) {
+        handlers.showErrorMessage("Swarm retry is not available in this runtime.");
+        return true;
+      }
+      handlers.showSystemMessage(command.output);
+      try {
+        const retried = await handlers.retrySwarmStage(action.runId, action.stage);
+        emitOptionalCommandResult(retried, handlers);
+      } catch (error) {
+        handlers.showErrorMessage(
+          `Failed to retry swarm ${action.runId} stage ${action.stage}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return true;
+
+    case "cancel_swarm":
+      if (!handlers.cancelSwarm) {
+        handlers.showErrorMessage("Swarm cancellation is not available in this runtime.");
+        return true;
+      }
+      handlers.showSystemMessage(command.output);
+      try {
+        const cancelled = await handlers.cancelSwarm(action.runId);
+        emitOptionalCommandResult(cancelled, handlers);
+      } catch (error) {
+        handlers.showErrorMessage(
+          `Failed to cancel swarm ${action.runId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return true;
+
+    case "register_external_channel_adapter":
+      handlers.showSystemMessage(command.output);
+      if (!handlers.requestExternalChannelRegistration) {
+        return true;
+      }
+      try {
+        const requested = await handlers.requestExternalChannelRegistration(action.channelId);
+        emitOptionalCommandResult(requested, handlers);
+      } catch (error) {
+        handlers.showErrorMessage(
+          `Failed to request external channel registration for ${action.channelId}: host handler failed. Inspect host-owned logs for details.`,
+        );
+      }
+      return true;
+
+    case "setup_external_channel_webhook":
+      handlers.showSystemMessage(command.output);
+      if (!handlers.requestExternalChannelWebhookRegistration) {
+        return true;
+      }
+      try {
+        const requested = await handlers.requestExternalChannelWebhookRegistration(action.channelId);
+        emitOptionalCommandResult(requested, handlers);
+      } catch (error) {
+        handlers.showErrorMessage(
+          `Failed to request external channel webhook setup for ${action.channelId}: host handler failed. Inspect host-owned logs for details.`,
+        );
+      }
+      return true;
+
+    case "setup_external_channel_subscription":
+      handlers.showSystemMessage(command.output);
+      if (!handlers.requestExternalChannelSubscriptionSetup) {
+        return true;
+      }
+      try {
+        const requested = await handlers.requestExternalChannelSubscriptionSetup(action.channelId);
+        emitOptionalCommandResult(requested, handlers);
+      } catch {
+        handlers.showErrorMessage(
+          `Failed to request external channel subscription setup for ${action.channelId}: host handler failed. Inspect host-owned logs for details.`,
         );
       }
       return true;
@@ -332,7 +492,31 @@ export async function executeCommand(
       );
       return true;
 
+    case "set_memory_truth_mode":
+      if (!handlers.setMemoryTruthMode) {
+        handlers.showErrorMessage("Memory recall control is not available in this runtime.");
+        return true;
+      }
+      try {
+        await handlers.setMemoryTruthMode(action.mode);
+      } catch (error) {
+        handlers.showErrorMessage(
+          `Failed to update memory recall mode: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return true;
+      }
+      handlers.showSystemMessage(
+        runActive
+          ? `${command.output} Active run keeps current memory recall; new mode applies next run.`
+          : command.output,
+      );
+      return true;
+
     case "cancel_run":
+      if (runCancelling) {
+        handlers.showSystemMessage("Cancellation already in progress for the active Colony run.");
+        return true;
+      }
       if (!runActive) {
         handlers.showSystemMessage("No active Colony run to cancel.");
         return true;
@@ -353,6 +537,12 @@ export async function executeCommand(
       return true;
 
     case "clear_session":
+      if (runCancelling) {
+        handlers.showSystemMessage(
+          "Cannot clear session while a Colony run is stopping. Wait for idle, then try again.",
+        );
+        return true;
+      }
       if (runActive) {
         handlers.showSystemMessage(
           "Cannot clear session while a Colony run is active. Use /cancel, Ctrl+C, or Esc first.",
@@ -382,6 +572,12 @@ export async function executeCommand(
       return true;
 
     case "resume_session":
+      if (runCancelling) {
+        handlers.showSystemMessage(
+          "Cannot resume another session while a Colony run is stopping. Wait for idle, then try again.",
+        );
+        return true;
+      }
       if (runActive) {
         handlers.showSystemMessage(
           "Cannot resume another session while a Colony run is active. Use /cancel, Ctrl+C, or Esc first.",

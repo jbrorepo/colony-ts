@@ -58,7 +58,7 @@ export interface SearchHit {
 /** Search result set. */
 export interface SearchResult {
   query: string;
-  filters: { wing?: string; room?: string };
+  filters: { wing?: string; room?: string; hall?: string; sourceFile?: string };
   totalBeforeFilter: number;
   results: SearchHit[];
   error?: string;
@@ -175,4 +175,11 @@ export interface StackStatus {
   l2OnDemand: { description: string };
   l3DeepSearch: { description: string };
   totalDrawers: number;
+  hierarchy: {
+    wings: Record<string, number>;
+    rooms: Record<string, number>;
+    halls: Record<string, number>;
+    sources: Record<string, number>;
+    taxonomy: Record<string, Record<string, Record<string, number>>>;
+  };
 }

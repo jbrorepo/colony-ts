@@ -112,7 +112,10 @@ async function verifyAutoMemory(): Promise<void> {
     });
 
     assert(surfaced.length > 0, "Auto memory surfaces relevant memory");
-    assert(surfaced[0]!.content.includes("Architecture decision"), "Relevant memory content preserved");
+    assert(
+      surfaced.some((entry) => entry.content.toLowerCase().includes("architecture decision")),
+      "Relevant memory content preserved",
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -44,6 +44,32 @@ export interface StartupDiagnosticsOptions {
   fetchImpl?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 }
 
+export type StartupDoctorFocusView =
+  | "workspace"
+  | "config"
+  | "data"
+  | "terminal"
+  | "local"
+  | "cloud"
+  | "providers"
+  | "errors"
+  | "warnings";
+
+type StartupReportLike = {
+  passed?: boolean;
+  errorCount?: number;
+  warningCount?: number;
+  checks?: StartupCheckLike[];
+};
+
+type StartupCheckLike = {
+  name?: string;
+  passed?: boolean;
+  severity?: StartupSeverity | string;
+  message?: string;
+  fix?: string;
+};
+
 const DEFAULT_OLLAMA_BASE_URL =
   process.env.COLONY_OLLAMA_BASE_URL
   ?? process.env.COLONY_LLM_API_BASE
@@ -189,14 +215,91 @@ export function formatStartupReport(
   return lines.join("\n");
 }
 
-export function firstBlockingStartupCheck(report: StartupReport | null): StartupCheck | null {
+export function firstBlockingStartupCheck(report: StartupReportLike | null): StartupCheckLike | null {
   if (!report || report.errorCount === 0) {
     return null;
   }
 
-  return report.checks.find((check) => !check.passed && check.severity === "error")
-    ?? report.checks.find((check) => !check.passed)
+  return report.checks?.find((check) => !check.passed && check.severity === "error")
+    ?? report.checks?.find((check) => !check.passed)
     ?? null;
+}
+
+function startupCheckHaystack(check: StartupCheckLike): string {
+  return [check.name, check.message, check.fix]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join(" ")
+    .toLowerCase();
+}
+
+function startupCheckMatches(check: StartupCheckLike, terms: string[]): boolean {
+  const haystack = startupCheckHaystack(check);
+  return terms.some((term) => haystack.includes(term));
+}
+
+export function classifyStartupDoctorFocus(check: StartupCheckLike | null): StartupDoctorFocusView {
+  if (!check) return "errors";
+  if (startupCheckMatches(check, ["terminal", "tty", "raw mode", "keyboard input", "hotkeys", "paging shortcuts", "viewport"])) {
+    return "terminal";
+  }
+  if (startupCheckMatches(check, ["data directory", "permissions:", "sessions writable", "transcripts writable", "tool-results writable", "is writable", "data dir"])) {
+    return "data";
+  }
+  if (startupCheckMatches(check, ["workspace", "project root", "marker", "dev command", "verify command", "workspace packages"])) {
+    return "workspace";
+  }
+  if (startupCheckMatches(check, ["ollama", "local-provider boundary", "wsl", "localhost:11434", "local runtime"])) {
+    return "local";
+  }
+  if (startupCheckMatches(check, ["cloud fallback", "credentials", "connectivity", "anthropic", "claude", "gemini", "google", "openai"])) {
+    return "cloud";
+  }
+  if (startupCheckMatches(check, ["config", ".env", "api key", "llm config", "default provider"])) {
+    return "config";
+  }
+  if (startupCheckMatches(check, ["provider", "fallback"])) {
+    return "providers";
+  }
+  return String(check.severity ?? "info").toLowerCase() === "warning" ? "warnings" : "errors";
+}
+
+export function startupDoctorFocusCommand(report: StartupReportLike | null): string | null {
+  if (!report || report.passed) return null;
+  const focus = classifyStartupDoctorFocus(
+    firstBlockingStartupCheck(report)
+    ?? report.checks?.find((check) => !check.passed)
+    ?? null,
+  );
+  if (focus === "errors") return "/doctor errors";
+  if (focus === "warnings") return "/doctor warnings";
+  return `/doctor ${focus}`;
+}
+
+export function startupDoctorInspectCommands(
+  report: StartupReportLike | null,
+  opts: { includeGeneral?: boolean; includeSeverity?: boolean; includeFirstRun?: boolean } = {},
+): string[] {
+  if (!report || report.passed) return [];
+
+  const includeGeneral = opts.includeGeneral ?? true;
+  const includeSeverity = opts.includeSeverity ?? true;
+  const includeFirstRun = opts.includeFirstRun ?? true;
+  const commands: string[] = [];
+  const seen = new Set<string>();
+  const push = (command: string | null) => {
+    if (!command || seen.has(command)) return;
+    seen.add(command);
+    commands.push(command);
+  };
+
+  if (includeGeneral) push("/doctor");
+  push(startupDoctorFocusCommand(report));
+  if (includeSeverity) {
+    if ((report.errorCount ?? 0) > 0) push("/doctor errors");
+    if ((report.warningCount ?? 0) > 0) push("/doctor warnings");
+  }
+  if (includeFirstRun) push("/doctor first-run");
+  return commands;
 }
 
 export function formatStartupBlockMessage(report: StartupReport | null): string | null {
@@ -209,7 +312,14 @@ export function formatStartupBlockMessage(report: StartupReport | null): string 
   if (blockingCheck.fix) {
     lines.push(`Fix: ${blockingCheck.fix}`);
   }
-  lines.push("Inspect: /doctor | /doctor errors");
+  const inspectCommands = startupDoctorInspectCommands(report, {
+    includeGeneral: true,
+    includeSeverity: true,
+    includeFirstRun: true,
+  });
+  if (inspectCommands.length > 0) {
+    lines.push(`Inspect: ${inspectCommands.join(" | ")}`);
+  }
   return lines.join("\n");
 }
 
@@ -219,7 +329,12 @@ export function formatStartupPlaceholder(report: StartupReport | null): string |
     return null;
   }
 
-  return `Startup blocked: ${blockingCheck.name} | /doctor | /doctor errors`;
+  const inspectCommands = startupDoctorInspectCommands(report, {
+    includeGeneral: false,
+    includeSeverity: false,
+    includeFirstRun: true,
+  }).slice(0, 2);
+  return `Startup blocked: ${blockingCheck.name}${inspectCommands.length > 0 ? ` | ${inspectCommands.join(" | ")}` : ""}`;
 }
 
 function checkWorkspace(workspace: WorkspaceInfo | null): StartupCheck {
