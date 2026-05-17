@@ -1,4 +1,9 @@
 import type { RuntimeWorkflowRunSnapshot } from "./runtime/runtime-snapshot";
+import {
+  getWorkflowRecipe,
+  listWorkflowRecipes,
+  type WorkflowRecipeDescriptor,
+} from "./workflow/recipes/gstack-inspired";
 
 export interface GatewayWorkflowCommandPayload {
   output: string;
@@ -6,10 +11,10 @@ export interface GatewayWorkflowCommandPayload {
   data?: Record<string, unknown>;
 }
 
-export type WorkflowViewMode = "summary" | "active" | "latest";
+export type WorkflowViewMode = "summary" | "active" | "latest" | "recipes" | { inspectRecipe: string };
 
 export function workflowInspectViews(): string {
-  return "/workflow | /workflow active | /workflow latest";
+  return "/workflow | /workflow active | /workflow latest | /workflow recipes | /workflow inspect <recipe>";
 }
 
 export function resolveWorkflowView(args: string[]): WorkflowViewMode | { error: string } {
@@ -17,6 +22,8 @@ export function resolveWorkflowView(args: string[]): WorkflowViewMode | { error:
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "active" || raw === "running" || raw === "paused") return "active";
   if (raw === "latest" || raw === "recent") return "latest";
+  if (raw === "recipes") return "recipes";
+  if (raw === "inspect") return { inspectRecipe: args[1] ?? "" };
   return {
     error: `Unknown workflow view '${raw}'.\n\nViews: ${workflowInspectViews()}`,
   };
@@ -63,6 +70,20 @@ export function buildWorkflowCommandPayload(opts: {
 }): GatewayWorkflowCommandPayload {
   const view = resolveWorkflowView(opts.args);
   if (typeof view === "object") {
+    if ("inspectRecipe" in view) {
+      const recipe = getWorkflowRecipe(view.inspectRecipe);
+      if (!recipe) {
+        return {
+          output: `Workflow recipe not found: ${view.inspectRecipe}\n\nViews: ${workflowInspectViews()}`,
+          isError: true,
+          data: { view: "inspect", recipe: view.inspectRecipe },
+        };
+      }
+      return {
+        output: renderWorkflowRecipeInspect(recipe),
+        data: { view: "inspect", recipe: recipe.id },
+      };
+    }
     return {
       output: view.error,
       isError: true,
@@ -70,6 +91,13 @@ export function buildWorkflowCommandPayload(opts: {
   }
 
   const runs = [...opts.runs].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  if (view === "recipes") {
+    const recipes = listWorkflowRecipes();
+    return {
+      output: renderWorkflowRecipesView(recipes),
+      data: { view, count: recipes.length },
+    };
+  }
   if (view === "latest") {
     return {
       output: renderWorkflowLatestView(latestWorkflowRun(runs)),
@@ -85,6 +113,37 @@ export function buildWorkflowCommandPayload(opts: {
     output: renderWorkflowSummaryView(selectedRuns, runs.length, view),
     data: { view, count: selectedRuns.length, total: runs.length },
   };
+}
+
+function renderWorkflowRecipesView(recipes: WorkflowRecipeDescriptor[]): string {
+  const lines = ["Workflow Recipes:", ""];
+  for (const recipe of recipes) {
+    lines.push(`- ${recipe.id} | ${recipe.status} | ${recipe.summary}`);
+  }
+  lines.push("");
+  lines.push("Inspect: /workflow inspect <recipe>");
+  lines.push("No live GitHub, browser, deploy, or channel mutation by default.");
+  return lines.join("\n");
+}
+
+function renderWorkflowRecipeInspect(recipe: WorkflowRecipeDescriptor): string {
+  return [
+    `Workflow Recipe: ${recipe.id}`,
+    "",
+    `Title: ${recipe.title}`,
+    `Status: ${recipe.status}`,
+    `Summary: ${recipe.summary}`,
+    "No live GitHub, browser, deploy, or channel mutation by default.",
+    "",
+    "Steps:",
+    ...recipe.steps.map((step) => `- ${step.id} | ${step.kind} | ${step.title} - ${step.description}`),
+    "",
+    "Approval checkpoints:",
+    ...recipe.approvalCheckpoints.map((checkpoint) => `- ${checkpoint}`),
+    "",
+    "Verification:",
+    ...recipe.verification.map((item) => `- ${item}`),
+  ].join("\n");
 }
 
 function renderWorkflowSummaryView(

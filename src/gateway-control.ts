@@ -328,6 +328,8 @@ function renderMemoryQueryPlan(
     `Distance threshold: ${recallControls.distanceThreshold}`,
     `Graph hops: nearby=${recallControls.nearbyHops} broader=${recallControls.broaderHops}`,
     `Filter controls: hall=${recallControls.hall} wing=${recallControls.wing} room=auto source=auto`,
+    `Route explanation: starts at hinted hall/wing, resolves exact transcript truth first, then nearby/broader/related palace routes when enabled.`,
+    `Filter explanation: hall=${recallControls.hall} and wing=${recallControls.wing} constrain candidate routes before fallback stages are reported.`,
     `Precision diagnostics: ${recallControls.precisionDiagnostics}`,
     "",
     `Palace hint: ${palaceHint}`,

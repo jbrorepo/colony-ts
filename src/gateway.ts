@@ -726,8 +726,8 @@ export class SlashCommandParser {
     });
   };
 
-  private cmdBrowser = (args: string[], _ctx: SlashCommandContext): CommandResult => {
-    const payload = buildBrowserCommandPayload(args);
+  private cmdBrowser = (args: string[], ctx: SlashCommandContext): CommandResult => {
+    const payload = buildBrowserCommandPayload(args, ctx.browser ?? {});
     return result({
       command: "browser",
       output: payload.output,
@@ -737,7 +737,10 @@ export class SlashCommandParser {
   };
 
   private cmdSkills = (args: string[], ctx: SlashCommandContext): CommandResult => {
-    const payload = buildSkillsCommandPayload(args, ctx.skills ?? {});
+    const payload = buildSkillsCommandPayload(args, {
+      ...(ctx.skills ?? {}),
+      toolDefinitions: ctx.skills?.toolDefinitions ?? ctx.toolDefinitions,
+    });
     return result({
       command: "skills",
       output: payload.output,

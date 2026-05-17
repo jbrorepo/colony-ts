@@ -12,12 +12,17 @@ import {
   type SkillRollbackResult,
   type SkillSourceMetadata,
 } from "./skills";
+import {
+  generateSkillDocsPreview,
+  type GeneratedSkillDocsToolDefinition,
+} from "./skills/generated-docs";
 
 export interface GatewaySkillsContext {
   catalog?: SkillCatalog | null;
   skills?: SkillDefinition[];
   audit?: SkillCatalogAuditOptions;
   stage?: GatewaySkillsStageContext;
+  toolDefinitions?: GeneratedSkillDocsToolDefinition[];
 }
 
 export interface GatewaySkillsStageContext {
@@ -105,12 +110,28 @@ export function buildSkillsCommandPayload(
     };
   }
 
+  if (command === "docs-preview" || command === "docs") {
+    const preview = generateSkillDocsPreview({
+      skills,
+      toolDefinitions: context.toolDefinitions ?? [],
+    });
+    return {
+      output: preview.markdown,
+      data: {
+        action: "skills_docs_preview",
+        skills: preview.skillCount,
+        tools: preview.toolCount,
+        truncated: preview.truncated,
+      },
+    };
+  }
+
   if (command === "staged" || command === "stage") {
     return buildStagedSkillsPayload(args.slice(1), context.stage ?? {});
   }
 
   return {
-    output: "Usage: /skills [list|search <query>|inspect <name>|audit|plan|staged]",
+    output: "Usage: /skills [list|search <query>|inspect <name>|audit|plan|docs-preview|staged]",
     isError: true,
     data: { action: "skills_usage" },
   };

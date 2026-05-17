@@ -80,7 +80,7 @@ function verifyGatewayCommand(): void {
   const status = parser.tryHandle("/browser");
   assertEqual(status.handled, true, "/browser resolves");
   assert(status.output.includes("Browser Sidecar Boundary"), "/browser renders boundary header");
-  assert(status.output.includes("Status: planned"), "/browser shows planned status");
+  assert(status.output.includes("Status: available"), "/browser shows available lifecycle status");
   assert(status.output.includes("Starts listener by default: no"), "/browser states no default listener");
   assert(status.output.includes("Persists credentials: no"), "/browser states no credential persistence");
   assertEqual(status.data.action, "browser_status", "/browser data action is status");
@@ -97,7 +97,7 @@ function verifyGatewayCommand(): void {
   assert(contract.output.includes("approval_required_for_tunnel"), "/browser contract includes tunnel approval invariant");
   assertEqual(contract.data.action, "browser_contract", "/browser contract data action is contract");
 
-  const bad = parser.tryHandle("/browser start");
+  const bad = parser.tryHandle("/browser unknown");
   assertEqual(bad.isError, true, "/browser unknown subcommand fails closed");
   assert(bad.output.includes("Usage: /browser"), "/browser unknown subcommand shows usage");
 }

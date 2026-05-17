@@ -69,6 +69,10 @@ Optional recovery commands:
 | Caste identity | 12-caste method framework display compatibility | Legacy persisted caste values remain aliases; no destructive rename in Alpha 0 |
 | GitHub | Local-first handoff and approved workspace action planning | No push or PR creation without explicit approval and host credentials |
 | Web control | Local-only scoped status and action handoff | No default listener, no public hosting, no missing-scope mutation, no direct web mutation execution |
+| Browser sidecar | Browser sidecar lifecycle remains local-only | No listener bind, Chromium spawn, artifact write, tunnel, or credential persistence without explicit approval |
+| Skills | Generated skill documentation and trace-to-skill output are preview/proposal artifacts | No generated `SKILL.md` is promoted or written by preview/proposal views |
+| Workflows | Workflow recipes are descriptor-first | No live GitHub, browser, deploy, or channel mutation by default |
+| Plugins | Local plugin activation preflight is host-owned | No default live browser tunnel, plugin activation, registry fetch, channel delivery, or credential persistence is shipped. |
 | Channels | Experimental host-owned foundations | No channel adapter is presented as default alpha delivery |
 
 ## Release Checklist

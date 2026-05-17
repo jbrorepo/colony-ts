@@ -136,13 +136,20 @@ export function formatSwarmRuns(runs: SwarmRunSnapshot[]): string {
 }
 
 export function formatSwarmRunDetail(run: SwarmRunSnapshot): string {
+  const tokenTotal = (run.stages ?? []).reduce((sum, stage) => sum + (stage.totalTokens ?? 0), 0);
+  const costTotal = (run.stages ?? []).reduce((sum, stage) => sum + (stage.estimatedCostUsd ?? 0), 0);
+  const latestFailure = [...(run.stages ?? [])].reverse().find((stage) => stage.failureReason);
   const lines = [
     "Swarm Run Detail:",
     `${run.runId} | ${run.status} | ${run.executionMode ?? "coordinator_only"}`,
+    "Run Summary:",
     `Title: ${run.title}`,
     `Objective: ${run.objective}`,
     `Execution: ${run.execution.executionId}`,
     `Workers: ${run.workerCount}`,
+    `Progress: ${run.completedTaskCount}/${run.taskCount} complete | failed ${run.failedTaskCount} | cancelled ${run.cancelledTaskCount}`,
+    `Usage: tokens ${tokenTotal} | cost $${costTotal.toFixed(4)}`,
+    `Latest failure: ${latestFailure ? `${latestFailure.stage} - ${latestFailure.failureReason}` : "none"}`,
     `Tasks: assigned ${run.assignedTaskCount}/${run.taskCount} | done ${run.completedTaskCount}/${run.taskCount} | failed ${run.failedTaskCount} | cancelled ${run.cancelledTaskCount}`,
     "Stage Details:",
     "Stage Timeline:",
@@ -155,6 +162,7 @@ export function formatSwarmRunDetail(run: SwarmRunSnapshot): string {
     if (stage.failureReason) lines.push(`  failure: ${stage.failureReason}`);
     if (stage.awaitingApproval?.reason) lines.push(`  approval: ${stage.awaitingApproval.reason}`);
     if (stage.artifactReview && stage.artifactReview.length > 0) {
+      lines.push("  Artifact Review:");
       lines.push("  artifacts:");
       for (const artifact of stage.artifactReview) {
         const uri = artifact.uri ? ` | uri ${artifact.uri}` : "";
@@ -171,9 +179,11 @@ export function formatSwarmRunDetail(run: SwarmRunSnapshot): string {
       }
     }
   }
+  lines.push("Next actions:");
   lines.push("Resume: /swarm resume <swarm_run_id>");
   lines.push("Retry: /swarm retry <swarm_run_id> <plan|execute|review>");
   lines.push("Cancel: /swarm cancel <swarm_run_id>");
+  if (latestFailure) lines.push(`Suggested retry: /swarm retry ${run.runId} ${latestFailure.stage}`);
   return lines.join("\n");
 }
 

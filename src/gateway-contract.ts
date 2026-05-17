@@ -18,6 +18,7 @@ import type { GatewayDaemonContext } from "./gateway-daemon";
 import type { GatewaySkillsContext } from "./gateway-skills";
 import type { GatewayChannelsContext } from "./gateway-channels";
 import type { GatewayToolDefinitionView } from "./gateway-tools";
+import type { BrowserSidecarRuntime } from "./browser/browser-sidecar-runtime";
 
 export type CommandAction =
   | { kind: "display" }
@@ -173,6 +174,9 @@ export interface SlashCommandContext {
   runtime?: Partial<RuntimeContextSnapshot> | null;
   swarm?: {
     runs?: SwarmRunSnapshot[];
+  } | null;
+  browser?: {
+    runtime?: BrowserSidecarRuntime | null;
   } | null;
   daemon?: GatewayDaemonContext | null;
   channels?: GatewayChannelsContext | null;
