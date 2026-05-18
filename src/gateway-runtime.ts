@@ -1,3 +1,5 @@
+import { scrubSecrets } from "./security/log-sanitizer";
+
 export type StatusViewMode = "summary" | "session" | "saved" | "runtime" | "operator";
 
 export interface GatewayStatusCommandPayload {
@@ -91,8 +93,23 @@ export function statusInspectViews(): string {
   return "/status | /status session | /status saved | /status runtime | /status operator";
 }
 
+function redactRuntimeViewInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeRuntimeViewInput(value: string): string {
+  const redacted = redactRuntimeViewInput(value);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeRuntimeViewArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 export function resolveStatusView(args: string[]): StatusViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeRuntimeViewInput(normalizeRuntimeViewArgs(args)[0] ?? "");
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "session" || raw === "live" || raw === "current") return "session";
   if (raw === "saved" || raw === "sessions" || raw === "persisted") return "saved";
@@ -110,7 +127,7 @@ export function hooksInspectViews(): string {
 }
 
 export function resolveHooksView(args: string[]): HooksViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeRuntimeViewInput(normalizeRuntimeViewArgs(args)[0] ?? "");
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "recent" || raw === "events") return "recent";
   if (raw === "perf" || raw === "performance") return "perf";
