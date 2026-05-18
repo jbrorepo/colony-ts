@@ -7,6 +7,7 @@ import {
   type PersistedToolResult,
 } from "./runtime/tool-result-storage";
 import type { ToolDefinition } from "./runtime/tools-registry";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export type ToolsViewMode = "summary" | "approvals" | "recent" | "artifacts" | "perf";
 export type PermissionsViewMode = "summary" | "active" | "allowed" | "denied" | "rules";
@@ -181,8 +182,23 @@ export function toolsInspectViews(): string {
   return "/tools | /tools approvals | /tools recent | /tools artifacts | /tools perf";
 }
 
+function redactToolViewInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeToolViewInput(value: string): string {
+  const redacted = redactToolViewInput(value);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeToolViewArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 export function resolveToolsView(args: string[]): ToolsViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeToolViewInput(normalizeToolViewArgs(args)[0] ?? "");
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "approvals" || raw === "approval") return "approvals";
   if (raw === "recent" || raw === "activity") return "recent";
@@ -198,7 +214,7 @@ export function permissionsInspectViews(): string {
 }
 
 export function resolvePermissionsView(args: string[]): PermissionsViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeToolViewInput(normalizeToolViewArgs(args)[0] ?? "");
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "active") return "active";
   if (raw === "allowed" || raw === "allow") return "allowed";
