@@ -638,10 +638,10 @@ export function renderPerfCompactionsView(summary: GatewayCompactionPerfSummary,
     lines.push(`Average duration: ${summary.averageMs.toFixed(1)}ms`);
   }
   if (summary.strongestSave) {
-    lines.push(`Best save: ${summary.strongestSave.strategy} | ~${summary.strongestSave.tokensSavedEstimate.toLocaleString()} tokens | ${summary.strongestSave.originalCount}->${summary.strongestSave.finalCount}`);
+    lines.push(`Best save: ${redactEventSurfaceText(summary.strongestSave.strategy)} | ~${summary.strongestSave.tokensSavedEstimate.toLocaleString()} tokens | ${summary.strongestSave.originalCount}->${summary.strongestSave.finalCount}`);
   }
   if (summary.slowest) {
-    lines.push(`Slowest compaction: ${summary.slowest.strategy} | ${summary.slowest.durationMs ?? 0}ms`);
+    lines.push(`Slowest compaction: ${redactEventSurfaceText(summary.slowest.strategy)} | ${summary.slowest.durationMs ?? 0}ms`);
   }
   lines.push("");
   lines.push("Inspect: /compact status | /compact recent | /compact handoff");
@@ -704,10 +704,10 @@ export function renderPerfSummaryView(opts: {
   lines.push("");
   lines.push(`Compactions: ${opts.compactionSummary.recentCount} recent | ${opts.compactionSummary.failureCount} failure | ${opts.compactionSummary.timedCount} timed | /compact recent`);
   if (opts.compactionSummary.strongestSave) {
-    lines.push(`Best save: ${opts.compactionSummary.strongestSave.strategy} | ~${opts.compactionSummary.strongestSave.tokensSavedEstimate.toLocaleString()} tokens`);
+    lines.push(`Best save: ${redactEventSurfaceText(opts.compactionSummary.strongestSave.strategy)} | ~${opts.compactionSummary.strongestSave.tokensSavedEstimate.toLocaleString()} tokens`);
   }
   if (opts.compactionSummary.slowest) {
-    lines.push(`Slowest compaction: ${opts.compactionSummary.slowest.strategy} | ${opts.compactionSummary.slowest.durationMs ?? 0}ms`);
+    lines.push(`Slowest compaction: ${redactEventSurfaceText(opts.compactionSummary.slowest.strategy)} | ${opts.compactionSummary.slowest.durationMs ?? 0}ms`);
   }
   lines.push("");
   lines.push(`Views: ${opts.views}`);
