@@ -18,23 +18,25 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
     return buildGitHubWorkspaceApprovalPayload(args[2]);
   }
   if (scope === "pr" && action === "plan") {
-    const runId = requiredIdentifier(args[2]);
+    const runId = requiredGitHubPrIdentifier(args[2]);
     if (!runId) return missingGitHubIdentifier("Run id", "/github pr plan <run_id>");
+    if (!runId.ok) return rejectedGitHubIdentifier("Run id", "/github pr plan <run_id>");
     return {
       output: [
         "GitHub PR Plan:",
         "",
-        `Run: ${runId}`,
+        `Run: ${runId.value}`,
         "Approvals required: push, create_pr",
         "Next valid command: /github pr create <run_id> --approved",
       ].join("\n"),
-      data: { action: "github_pr_plan", runId },
+      data: { action: "github_pr_plan", runId: runId.value },
     };
   }
   if (scope === "pr" && action === "create") {
     const approved = args.includes("--approved");
-    const runId = requiredIdentifier(args.slice(2).find((arg) => !arg.startsWith("--")));
+    const runId = requiredGitHubPrIdentifier(args.slice(2).find((arg) => !arg.startsWith("--")));
     if (!runId) return missingGitHubIdentifier("Run id", "/github pr create <run_id> --approved");
+    if (!runId.ok) return rejectedGitHubIdentifier("Run id", "/github pr create <run_id> --approved");
     return {
       output: [
         approved ? "GitHub PR creation approved." : "GitHub PR creation blocked.",
@@ -46,18 +48,19 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
         "Next valid command: /github pr status <receipt_id>",
       ].join("\n"),
       isError: !approved,
-      data: { action: approved ? "github_pr_create" : "github_pr_create_blocked", runId },
-      action: approved ? { kind: "github_pr_create", runId, approved: true } : { kind: "display" },
+      data: { action: approved ? "github_pr_create" : "github_pr_create_blocked", runId: runId.value },
+      action: approved ? { kind: "github_pr_create", runId: runId.value, approved: true } : { kind: "display" },
     };
   }
   if (scope === "pr" && action === "status") {
-    const receiptId = requiredIdentifier(args[2]);
+    const receiptId = requiredGitHubPrIdentifier(args[2]);
     if (!receiptId) return missingGitHubIdentifier("Receipt id", "/github pr status <receipt_id>");
-    const receipt = (context.receipts ?? []).find((candidate) => candidate.receiptId === receiptId);
+    if (!receiptId.ok) return rejectedGitHubIdentifier("Receipt id", "/github pr status <receipt_id>");
+    const receipt = (context.receipts ?? []).find((candidate) => candidate.receiptId === receiptId.value);
     return {
-      output: receipt ? renderGitHubPrReceiptStatus(receipt) : `GitHub PR Receipt:\n\nReceipt not found: ${receiptId}\nNext valid command: /github pr plan <run_id>`,
+      output: receipt ? renderGitHubPrReceiptStatus(receipt) : `GitHub PR Receipt:\n\nReceipt not found: ${receiptId.value}\nNext valid command: /github pr plan <run_id>`,
       isError: !receipt,
-      data: { action: "github_pr_status", receiptId },
+      data: { action: "github_pr_status", receiptId: receiptId.value },
     };
   }
   return {
@@ -77,6 +80,18 @@ function requiredIdentifier(value: string | undefined): string | null {
   return normalized;
 }
 
+type GitHubPrIdentifierValidation = { ok: true; value: string } | { ok: false };
+
+function requiredGitHubPrIdentifier(value: string | undefined): GitHubPrIdentifierValidation | null {
+  const identifier = requiredIdentifier(value);
+  if (!identifier) return null;
+  const scrubbed = scrubGitHubApprovalSignature(identifier);
+  if (scrubbed.includes("[REDACTED]")) return { ok: false };
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(scrubbed)) return { ok: false };
+  if (scrubbed.includes("..") || scrubbed.includes("@{")) return { ok: false };
+  return { ok: true, value: scrubbed };
+}
+
 function missingGitHubIdentifier(label: string, command: string): GatewayBasicCommandPayload {
   return {
     output: [
@@ -86,6 +101,19 @@ function missingGitHubIdentifier(label: string, command: string): GatewayBasicCo
     ].join("\n"),
     isError: true,
     data: { action: "github_missing_identifier", label },
+  };
+}
+
+function rejectedGitHubIdentifier(label: string, command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      `${label} rejected.`,
+      "",
+      "GitHub PR identifiers must be local run/receipt ids, not paths, shell text, or credentials.",
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "github_rejected_identifier", label },
   };
 }
 
