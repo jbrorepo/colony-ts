@@ -188,6 +188,12 @@ function redactToolViewInput(value: string): string {
     .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
 }
 
+function redactToolSurfaceText(value: string): string {
+  return scrubSecrets(value)
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
 function normalizeToolViewInput(value: string): string {
   const redacted = redactToolViewInput(value);
   return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
@@ -270,9 +276,9 @@ export function renderToolsView(opts: {
     if (opts.pendingApproval?.toolName) {
       lines.push(`Pending approval: ${opts.pendingApproval.toolName}`);
       lines.push(`Risk: ${opts.pendingApproval.riskLevel ?? "unknown"} | Category: ${opts.pendingApproval.category ?? "unknown"}`);
-      if (opts.pendingApproval.signature) lines.push(`Signature: ${opts.pendingApproval.signature}`);
-      if (opts.pendingApproval.summary) lines.push(`Summary: ${opts.pendingApproval.summary}`);
-      if (opts.pendingApproval.reason) lines.push(`Reason: ${opts.pendingApproval.reason}`);
+      if (opts.pendingApproval.signature) lines.push(`Signature: ${redactToolSurfaceText(opts.pendingApproval.signature)}`);
+      if (opts.pendingApproval.summary) lines.push(`Summary: ${redactToolSurfaceText(opts.pendingApproval.summary)}`);
+      if (opts.pendingApproval.reason) lines.push(`Reason: ${redactToolSurfaceText(opts.pendingApproval.reason)}`);
       if (typeof opts.pendingApproval.warningCount === "number" && opts.pendingApproval.warningCount > 0) {
         lines.push(`Warnings: ${opts.pendingApproval.warningCount}`);
       }
@@ -399,7 +405,7 @@ export function renderPermissionsView(opts: {
   }
 
   lines.push(`Exact-signature session rules: ${opts.sessionRules.length}`);
-  lines.push(...(opts.sessionRules.length > 0 ? opts.sessionRules.map((rule) => `= ${rule}`) : ["none"]));
+  lines.push(...(opts.sessionRules.length > 0 ? opts.sessionRules.map((rule) => `= ${redactToolSurfaceText(rule)}`) : ["none"]));
   lines.push("");
   lines.push(`Views: ${permissionsInspectViews()}`);
   return lines.join("\n");
@@ -499,6 +505,7 @@ export function buildPermissionsCommandPayload(opts: {
   const allowed = [...(opts.permissions.allowed ?? [])].sort();
   const denied = [...(opts.permissions.denied ?? [])].sort();
   const sessionRules = [...(opts.permissions.sessionRules ?? [])].sort();
+  const displaySessionRules = sessionRules.map(redactToolSurfaceText);
 
   return {
     output: view === "summary"
@@ -507,17 +514,18 @@ export function buildPermissionsCommandPayload(opts: {
           active,
           allowed,
           denied,
-          sessionRules,
+          displaySessionRules,
         )}\nViews: ${permissionsInspectViews()}`
       : renderPermissionsView({
           view,
           active,
           allowed,
           denied,
-          sessionRules,
+          sessionRules: displaySessionRules,
         }),
     data: {
       ...opts.permissions,
+      sessionRules: displaySessionRules,
       view,
     } as Record<string, unknown>,
   };
