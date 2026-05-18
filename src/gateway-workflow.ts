@@ -81,6 +81,7 @@ export function buildWorkflowCommandPayload(opts: {
   const view = resolveWorkflowView(opts.args);
   if (typeof view === "object") {
     if ("startRecipe" in view) {
+      if (!view.startRecipe) return missingWorkflowIdentifier("Workflow recipe id", "/workflow start <recipe>");
       const recipe = getWorkflowRecipe(view.startRecipe);
       if (!recipe) {
         return {
