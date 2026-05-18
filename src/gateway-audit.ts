@@ -1,4 +1,5 @@
 import type { GatewayBasicCommandPayload } from "./gateway-basic";
+import { scrubSecrets } from "./security/log-sanitizer";
 import type { SecurityAuditTrail } from "./security/audit-trail";
 import { exportAuditJsonl, exportAuditSummary, projectAuditToOpenTelemetryEvents } from "./security/audit-export";
 
@@ -10,8 +11,24 @@ function auditInspectViews(): string {
   return "/audit status | /audit export jsonl | /audit export summary | /audit verify | /audit otel";
 }
 
+function redactAuditInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeAuditInput(value: string): string {
+  const redacted = redactAuditInput(value);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeAuditArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 export function buildAuditCommandPayload(args: string[], context: GatewayAuditContext = {}): GatewayBasicCommandPayload {
-  const command = (args[0] ?? "status").toLowerCase();
+  const normalizedArgs = normalizeAuditArgs(args);
+  const command = normalizeAuditInput(normalizedArgs[0] ?? "status");
   const trail = context.trail ?? null;
   if (!trail) {
     return {
@@ -21,7 +38,7 @@ export function buildAuditCommandPayload(args: string[], context: GatewayAuditCo
     };
   }
   if (command === "export") {
-    const format = args[1]?.trim().toLowerCase() ?? "";
+    const format = normalizeAuditInput(normalizedArgs[1] ?? "");
     if (!format || format.startsWith("--")) {
       return missingAuditExportFormat();
     }
