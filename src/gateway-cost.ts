@@ -23,6 +23,12 @@ export interface GatewayCostCommandPayload {
   isError?: boolean;
 }
 
+function redactCostSurfaceText(value: string): string {
+  return scrubSecrets(value)
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
 function readString(obj: unknown, keys: string[], fallback = ""): string {
   if (!obj || typeof obj !== "object") return fallback;
   const record = obj as Record<string, unknown>;
@@ -154,7 +160,7 @@ export function renderDetailedCostBreakdown(opts: {
     lines.push("Per-Model Usage:");
     for (const row of opts.modelRows) {
       const totalTokens = row.inputTokens + row.outputTokens;
-      lines.push(`  \`${row.model}\`: ${row.callCount} calls, ${totalTokens.toLocaleString()} tokens, ${row.apiDurationS.toFixed(1)}s API time`);
+      lines.push(`  \`${redactCostSurfaceText(row.model)}\`: ${row.callCount} calls, ${totalTokens.toLocaleString()} tokens, ${row.apiDurationS.toFixed(1)}s API time`);
     }
   }
 
@@ -174,7 +180,7 @@ export function renderCostModelsBreakdown(modelRows: GatewayCostUsageRow[]): str
   lines.push("");
   for (const row of modelRows) {
     const totalTokens = row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheCreationTokens;
-    lines.push(`\`${row.model}\``);
+    lines.push(`\`${redactCostSurfaceText(row.model)}\``);
     lines.push(`  calls ${row.callCount} | tokens ${totalTokens.toLocaleString()} | api ${row.apiDurationS.toFixed(1)}s`);
     lines.push(`  input ${row.inputTokens.toLocaleString()} | output ${row.outputTokens.toLocaleString()}`);
     if (row.cacheReadTokens > 0 || row.cacheCreationTokens > 0) {
@@ -246,12 +252,12 @@ export function renderCostPerfBreakdown(opts: {
       || left.model.localeCompare(right.model)
     ))[0];
   if (slowestAverage) {
-    lines.push(`Slowest average: \`${slowestAverage.model}\` | ${slowestAverage.callCount} calls | ${(slowestAverage.apiDurationS / slowestAverage.callCount).toFixed(2)}s/call`);
+    lines.push(`Slowest average: \`${redactCostSurfaceText(slowestAverage.model)}\` | ${slowestAverage.callCount} calls | ${(slowestAverage.apiDurationS / slowestAverage.callCount).toFixed(2)}s/call`);
   }
 
   const highestTotal = opts.modelRows[0];
   if (highestTotal) {
-    lines.push(`Highest total: \`${highestTotal.model}\` | ${highestTotal.apiDurationS.toFixed(1)}s over ${highestTotal.callCount} calls`);
+    lines.push(`Highest total: \`${redactCostSurfaceText(highestTotal.model)}\` | ${highestTotal.apiDurationS.toFixed(1)}s over ${highestTotal.callCount} calls`);
   }
 
   if (opts.modelRows.length > 0) {
@@ -259,7 +265,7 @@ export function renderCostPerfBreakdown(opts: {
     lines.push("Per-Model Latency:");
     for (const row of opts.modelRows) {
       const avg = row.callCount > 0 ? row.apiDurationS / row.callCount : 0;
-      lines.push(`  \`${row.model}\`: ${row.apiDurationS.toFixed(1)}s total | ${row.callCount} calls | ${avg.toFixed(2)}s/call`);
+      lines.push(`  \`${redactCostSurfaceText(row.model)}\`: ${row.apiDurationS.toFixed(1)}s total | ${row.callCount} calls | ${avg.toFixed(2)}s/call`);
     }
   }
 
