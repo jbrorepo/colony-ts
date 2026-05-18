@@ -42,9 +42,9 @@ export function buildSkillsCommandPayload(
   context: GatewaySkillsContext = {},
 ): GatewayBasicCommandPayload {
   const skills = resolveSkills(context);
-  const command = (args[0] ?? "list").toLowerCase();
+  const command = normalizeSkillsCommandToken(args[0], "list");
 
-  if (args.length === 0 || command === "list") {
+  if (command === "list") {
     return {
       output: renderSkillsList(skills),
       data: { action: "skills_list", count: skills.length },
@@ -154,10 +154,22 @@ export function buildSkillsCommandPayload(
   }
 
   return {
-    output: "Usage: /skills [list|search <query>|inspect <name>|audit|plan|docs-preview|staged]",
+    output: [
+      `Unknown skills command '${command}'.`,
+      "",
+      "Usage: /skills [list|search <query>|inspect <name>|audit|plan|docs-preview|staged]",
+      "Next valid command: /skills list | /skills search <query>",
+    ].join("\n"),
     isError: true,
     data: { action: "skills_usage" },
   };
+}
+
+function normalizeSkillsCommandToken(value: string | undefined, fallback: string): string {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return fallback;
+  const redacted = redactSkillLookupText(raw);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
 function isSkillDocsMutationArgument(value: string): boolean {
@@ -308,11 +320,11 @@ function buildStagedSkillsPayload(
   args: string[],
   context: GatewaySkillsStageContext,
 ): GatewayBasicCommandPayload {
-  const action = (args[0] ?? "list").toLowerCase();
+  const action = normalizeSkillsCommandToken(args[0], "list");
   const name = validateSkillLookupName(args[1]);
   const skillName = name?.ok ? name.value : "";
 
-  if (args.length === 0 || action === "list") return renderStagedSkillsList(context);
+  if (action === "list") return renderStagedSkillsList(context);
 
   if (isStagedSkillNameRequiredAction(action)) {
     if (!name) return missingStagedSkillName(action);
@@ -403,7 +415,12 @@ function buildStagedSkillsPayload(
   }
 
   return {
-    output: "Usage: /skills staged [list|preview <name>|audit <name>|approve <name>|promote <name> --approved|rollback <name>|history <name>]",
+    output: [
+      `Unknown staged skills command '${action}'.`,
+      "",
+      "Usage: /skills staged [list|preview <name>|audit <name>|approve <name>|promote <name> --approved|rollback <name>|history <name>]",
+      "Next valid command: /skills staged | /skills staged preview <name>",
+    ].join("\n"),
     isError: true,
     data: { action: "skills_staged_usage" },
   };
