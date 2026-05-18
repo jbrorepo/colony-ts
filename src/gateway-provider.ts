@@ -1,5 +1,6 @@
 import type { SlashCommandContext } from "./gateway-contract";
 import { doctorCheckPrefix } from "./gateway-doctor";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayProviderCommandPayload {
   output: string;
@@ -215,6 +216,18 @@ function normalizeModelRef(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function redactProviderInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeProviderSelectionInput(value: string | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized || normalized.startsWith("--")) return null;
+  return redactProviderInput(normalized);
+}
+
 function providerPerfCandidateModels(
   provider: string,
   runtime: ProviderCommandRuntime,
@@ -333,10 +346,11 @@ export function resolveConfiguredProvider(
 ): { provider: string } | { error: string } {
   const normalized = normalizeProviderAlias(raw);
   const configured = configuredProviderNames(runtime);
+  const displayRaw = redactProviderInput(raw);
 
   if (!normalized) {
     return {
-      error: `Usage: /provider use <name>\n\nConfigured providers: ${configured.join(", ") || "(none)"}`,
+      error: `Provider name required.\n\nNext valid command: /provider use <name>\nConfigured providers: ${configured.join(", ") || "(none)"}`,
     };
   }
 
@@ -350,12 +364,12 @@ export function resolveConfiguredProvider(
   }
   if (prefixMatches.length > 1) {
     return {
-      error: `Provider reference '${raw}' is ambiguous.\n\nMatches: ${prefixMatches.join(", ")}\nUse /provider use <full_name>.`,
+      error: `Provider reference '${displayRaw}' is ambiguous.\n\nMatches: ${prefixMatches.join(", ")}\nUse /provider use <full_name>.`,
     };
   }
 
   return {
-    error: `Unknown provider '${raw}'.\n\nConfigured providers: ${configured.join(", ") || "(none)"}\nUse /provider use <name>.`,
+    error: `Unknown provider '${displayRaw}'.\n\nConfigured providers: ${configured.join(", ") || "(none)"}\nUse /provider use <name>.`,
   };
 }
 
@@ -388,6 +402,7 @@ export function resolveProviderView(
 ): ProviderViewSpec | { error: string } {
   const raw = args.join(" ").trim().toLowerCase();
   const normalized = normalizeProviderAlias(raw);
+  const displayRaw = redactProviderInput(raw);
   if (!normalized || normalized === "summary" || normalized === "all") {
     return { kind: "summary" };
   }
@@ -426,12 +441,12 @@ export function resolveProviderView(
   }
   if (prefixMatches.length > 1) {
     return {
-      error: `Provider reference '${raw}' is ambiguous.\n\nMatches: ${prefixMatches.join(", ")}\nUse /provider <full_name>.`,
+      error: `Provider reference '${displayRaw}' is ambiguous.\n\nMatches: ${prefixMatches.join(", ")}\nUse /provider <full_name>.`,
     };
   }
 
   return {
-    error: `Unknown provider view '${raw}'.\n\nUse /provider, /provider health, /provider failovers, /provider failovers <name>, /provider perf, /provider perf <name>, /provider current, or /provider <name>.`,
+    error: `Unknown provider view '${displayRaw}'.\n\nUse /provider, /provider health, /provider failovers, /provider failovers <name>, /provider perf, /provider perf <name>, /provider current, or /provider <name>.`,
   };
 }
 
@@ -798,9 +813,9 @@ export function buildProviderCommandPayload(opts: {
 
   const verb = opts.args[0]?.trim().toLowerCase();
   if (verb === "use" || verb === "set" || verb === "select") {
-    const target = opts.args[1]?.trim() ?? "";
+    const target = normalizeProviderSelectionInput(opts.args[1]);
     const model = opts.args.slice(2).join(" ").trim() || undefined;
-    const resolvedProvider = resolveConfiguredProvider(target, runtime);
+    const resolvedProvider = resolveConfiguredProvider(target ?? "", runtime);
     if ("error" in resolvedProvider) {
       return {
         output: resolvedProvider.error,
