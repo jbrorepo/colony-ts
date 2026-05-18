@@ -1,3 +1,5 @@
+import { scrubSecrets } from "./security/log-sanitizer";
+
 export type CostViewMode = "summary" | "models" | "budget" | "perf";
 
 export interface GatewayCostUsageRow {
@@ -92,8 +94,23 @@ export function costInspectViews(): string {
   return "/cost | /cost models | /cost budget | /cost perf";
 }
 
+function redactCostInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeCostInput(value: string): string {
+  const redacted = redactCostInput(value);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeCostArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 export function resolveCostView(args: string[]): CostViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeCostInput(normalizeCostArgs(args)[0] ?? "");
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "models" || raw === "model") return "models";
   if (raw === "budget" || raw === "cap") return "budget";
