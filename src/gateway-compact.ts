@@ -98,8 +98,8 @@ export function appendLastCompactionDetails(
   lastCompaction: GatewayLastCompaction,
 ): void {
   lines.push("Last compaction:");
-  lines.push(`Strategy: ${lastCompaction.strategyUsed ?? "unknown"}`);
-  lines.push(`Trigger: ${compactionTriggerLabel(lastCompaction.triggerSource)}`);
+  lines.push(`Strategy: ${redactCompactSurfaceText(lastCompaction.strategyUsed ?? "unknown")}`);
+  lines.push(`Trigger: ${redactCompactSurfaceText(compactionTriggerLabel(lastCompaction.triggerSource))}`);
   if (typeof lastCompaction.usageBeforeFraction === "number") {
     lines.push(`Before usage: ${(lastCompaction.usageBeforeFraction * 100).toFixed(1)}%`);
   }
@@ -124,8 +124,8 @@ export function appendLastCompactionFailureDetails(
 ): void {
   if (!failure.message) return;
   lines.push("Last compaction failure:");
-  lines.push(`Strategy: ${failure.strategy ?? "unknown"}`);
-  lines.push(`Reason: ${failure.message}`);
+  lines.push(`Strategy: ${redactCompactSurfaceText(failure.strategy ?? "unknown")}`);
+  lines.push(`Reason: ${redactCompactSurfaceText(failure.message)}`);
 }
 
 export function renderCompactUsage(): string {
@@ -139,18 +139,18 @@ export function renderCompactHandoffView(
   if (!handoff) {
     lines.push("(No compaction memory handoff recorded yet)");
   } else {
-    lines.push(`Status: ${handoff.status}`);
-    lines.push(`Compaction: ${handoff.strategy} via ${compactionTriggerLabel(handoff.trigger)}`);
+    lines.push(`Status: ${redactCompactSurfaceText(handoff.status)}`);
+    lines.push(`Compaction: ${redactCompactSurfaceText(handoff.strategy)} via ${redactCompactSurfaceText(compactionTriggerLabel(handoff.trigger))}`);
     lines.push(`When: ${new Date(handoff.timestamp).toISOString()}`);
     lines.push(`Logged transcript turns: ${handoff.loggedCount}`);
     lines.push(`Structured memories: ${handoff.structuredCount}`);
     if (handoff.artifactId) {
-      lines.push(`Artifact: ${handoff.artifactId}${handoff.artifactChars ? ` | ${handoff.artifactChars.toLocaleString()} chars` : ""}`);
+      lines.push(`Artifact: ${redactCompactSurfaceText(handoff.artifactId)}${handoff.artifactChars ? ` | ${handoff.artifactChars.toLocaleString()} chars` : ""}`);
     } else {
       lines.push("Artifact: none");
     }
     if (handoff.errorMessage) {
-      lines.push(`Error: ${handoff.errorMessage}`);
+      lines.push(`Error: ${redactCompactSurfaceText(handoff.errorMessage)}`);
     }
   }
   lines.push("");
@@ -168,10 +168,10 @@ export function renderCompactRecentView(
     for (const event of events.slice(-5).reverse()) {
       const time = new Date(event.timestamp).toISOString();
       if (event.failureMessage) {
-        lines.push(`- ${event.strategy} via ${compactionTriggerLabel(event.trigger)} | failed${event.durationMs ? ` | ${event.durationMs}ms` : ""} | ${time}`);
-        lines.push(`  Reason: ${event.failureMessage}`);
+        lines.push(`- ${redactCompactSurfaceText(event.strategy)} via ${redactCompactSurfaceText(compactionTriggerLabel(event.trigger))} | failed${event.durationMs ? ` | ${event.durationMs}ms` : ""} | ${time}`);
+        lines.push(`  Reason: ${redactCompactSurfaceText(event.failureMessage)}`);
       } else {
-        lines.push(`- ${event.strategy} via ${compactionTriggerLabel(event.trigger)} | ${event.compacted ? `${event.originalCount}->${event.finalCount}` : "no change"} | saved ~${event.tokensSavedEstimate}t${event.durationMs ? ` | ${event.durationMs}ms` : ""} | ${time}`);
+        lines.push(`- ${redactCompactSurfaceText(event.strategy)} via ${redactCompactSurfaceText(compactionTriggerLabel(event.trigger))} | ${event.compacted ? `${event.originalCount}->${event.finalCount}` : "no change"} | saved ~${event.tokensSavedEstimate}t${event.durationMs ? ` | ${event.durationMs}ms` : ""} | ${time}`);
         if (event.compacted) {
           lines.push(`  Summarized: ${event.summarizedMessageCount} msg across ${event.summaryLineCount} lines`);
         }
@@ -190,10 +190,10 @@ export function renderCompactStatusView(
 
   if (!view.hasLiveSession) {
     lines.push("Live session: no");
-    lines.push(view.noActiveHint ?? "(No live session)");
+    lines.push(redactCompactSurfaceText(view.noActiveHint ?? "(No live session)"));
   } else {
     lines.push(`Live session: yes (${view.messageCount} messages)`);
-    lines.push(`Pressure: ${view.pressure}`);
+    lines.push(`Pressure: ${redactCompactSurfaceText(view.pressure)}`);
     if (view.contextLine) {
       lines.push(view.contextLine);
       if (view.autoThresholdLine) lines.push(view.autoThresholdLine);
@@ -207,7 +207,7 @@ export function renderCompactStatusView(
     }
   }
 
-  lines.push(`Queued: ${view.queued}`);
+  lines.push(`Queued: ${redactCompactSurfaceText(view.queued)}`);
   lines.push(`Recent events: ${view.recentEventCount}`);
   if (view.lastCompactionFailure?.message) {
     lines.push("");
@@ -219,12 +219,12 @@ export function renderCompactStatusView(
   }
   if (view.handoff) {
     lines.push("");
-    lines.push(`Last handoff: ${view.handoff.status} | ${view.handoff.strategy}/${view.handoff.trigger} | ${view.handoff.loggedCount} logged | ${view.handoff.structuredCount} structured`);
+    lines.push(`Last handoff: ${redactCompactSurfaceText(view.handoff.status)} | ${redactCompactSurfaceText(view.handoff.strategy)}/${redactCompactSurfaceText(view.handoff.trigger)} | ${view.handoff.loggedCount} logged | ${view.handoff.structuredCount} structured`);
     if (view.handoff.artifactId) {
-      lines.push(`Artifact: ${view.handoff.artifactId}${view.handoff.artifactChars ? ` | ${view.handoff.artifactChars.toLocaleString()} chars` : ""}`);
+      lines.push(`Artifact: ${redactCompactSurfaceText(view.handoff.artifactId)}${view.handoff.artifactChars ? ` | ${view.handoff.artifactChars.toLocaleString()} chars` : ""}`);
     }
     if (view.handoff.errorMessage) {
-      lines.push(`Handoff error: ${view.handoff.errorMessage}`);
+      lines.push(`Handoff error: ${redactCompactSurfaceText(view.handoff.errorMessage)}`);
     }
   }
 
@@ -235,7 +235,7 @@ export function renderCompactStatusView(
   } else {
     lines.push("Recommend: hold");
   }
-  lines.push(`Why: ${view.recommendation.reason}`);
+  lines.push(`Why: ${redactCompactSurfaceText(view.recommendation.reason)}`);
   lines.push("Inspect: /compact recent | /compact handoff | /status | /cost");
   return lines.join("\n");
 }
@@ -346,21 +346,21 @@ export function buildCompactCommandPayload(opts: {
 
   if (!requestedStrategy || args.length > 1) {
     return {
-      output: `Unknown compact strategy '${rawStrategy || "[empty]"}'.\n\n${renderCompactUsage()}`,
+      output: `Unknown compact strategy '${redactCompactSurfaceText(rawStrategy || "[empty]")}'.\n\n${renderCompactUsage()}`,
       isError: true,
     };
   }
 
   if (!opts.hasLiveSession) {
     return {
-      output: opts.noActiveHint ?? "(No live session)",
+      output: redactCompactSurfaceText(opts.noActiveHint ?? "(No live session)"),
       isError: true,
     };
   }
 
   if (requestedStrategy === "smart" && !opts.recommendation.strategy) {
     return {
-      output: `Smart compaction says hold.\nWhy: ${opts.recommendation.reason}\nInspect: /compact status | /status | /cost`,
+      output: `Smart compaction says hold.\nWhy: ${redactCompactSurfaceText(opts.recommendation.reason)}\nInspect: /compact status | /status | /cost`,
       data: {
         action: "compact",
         messageCount: opts.messageCount,
@@ -393,7 +393,7 @@ export function buildCompactCommandPayload(opts: {
     const normalizedQueued = normalizeCompactionStrategy(queued);
     if (queued === strategy) {
       return {
-        output: `Context compaction already queued (${queued}).\nIt will run before the next loop iteration.`,
+        output: `Context compaction already queued (${redactCompactSurfaceText(queued)}).\nIt will run before the next loop iteration.`,
         data: {
           action: "compact",
           messageCount: opts.messageCount,
@@ -406,7 +406,7 @@ export function buildCompactCommandPayload(opts: {
     }
     if (normalizedQueued && !isCompactionUpgrade(normalizedQueued, strategy)) {
       return {
-        output: `${queued} context compaction already queued.\nIt will run before the next loop iteration.`,
+        output: `${redactCompactSurfaceText(queued)} context compaction already queued.\nIt will run before the next loop iteration.`,
         data: {
           action: "compact",
           messageCount: opts.messageCount,
@@ -418,7 +418,7 @@ export function buildCompactCommandPayload(opts: {
       };
     }
     return {
-      output: `Context compaction change requested (${queued} -> ${strategy}).\nThe ${strategy} compaction will run before the next loop iteration.`,
+      output: `Context compaction change requested (${redactCompactSurfaceText(queued)} -> ${redactCompactSurfaceText(strategy)}).\nThe ${redactCompactSurfaceText(strategy)} compaction will run before the next loop iteration.`,
       data: {
         action: "compact",
         messageCount: opts.messageCount,
@@ -432,14 +432,14 @@ export function buildCompactCommandPayload(opts: {
   }
 
   const preflight = requestedStrategy === "smart"
-    ? `Running smart compaction (${strategy}) for ${opts.messageCount} messages...\nWhy: ${opts.recommendation.reason}`
-    : `Running ${strategy} compaction for ${opts.messageCount} messages...`;
+    ? `Running smart compaction (${redactCompactSurfaceText(strategy)}) for ${opts.messageCount} messages...\nWhy: ${redactCompactSurfaceText(opts.recommendation.reason)}`
+    : `Running ${redactCompactSurfaceText(strategy)} compaction for ${opts.messageCount} messages...`;
 
   return {
     output: opts.activeRun
       ? requestedStrategy === "smart"
-        ? `Context smart compaction selected ${strategy} for ${opts.messageCount} messages.\nWhy: ${opts.recommendation.reason}\nThe compaction engine will run before the next loop iteration.`
-        : `Context ${strategy} compaction requested for ${opts.messageCount} messages.\nThe compaction engine will run before the next loop iteration.`
+        ? `Context smart compaction selected ${redactCompactSurfaceText(strategy)} for ${opts.messageCount} messages.\nWhy: ${redactCompactSurfaceText(opts.recommendation.reason)}\nThe compaction engine will run before the next loop iteration.`
+        : `Context ${redactCompactSurfaceText(strategy)} compaction requested for ${opts.messageCount} messages.\nThe compaction engine will run before the next loop iteration.`
       : preflight,
     data: {
       action: "compact",
@@ -459,8 +459,12 @@ function normalizeCompactInspectionArgs(args: string[]): string[] {
 }
 
 function normalizeCompactStrategyInput(value: string): string {
-  const redacted = scrubSecrets(value.trim())
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  const redacted = redactCompactSurfaceText(value);
   return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function redactCompactSurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
