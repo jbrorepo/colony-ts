@@ -160,7 +160,7 @@ export function formatFailoverEventLine(event: {
   const at = typeof event.timestamp === "number"
     ? new Date(event.timestamp).toISOString()
     : "unknown-time";
-  return `${at} | ${event.fromProvider ?? "unknown"}:${event.fromModel ?? "unknown"} -> ${event.toProvider ?? "unknown"}:${event.toModel ?? "unknown"} (${event.errorType ?? "Error"})${event.errorMessage ? ` | ${event.errorMessage}` : ""}`;
+  return `${at} | ${redactProviderInput(event.fromProvider ?? "unknown")}:${redactProviderInput(event.fromModel ?? "unknown")} -> ${redactProviderInput(event.toProvider ?? "unknown")}:${redactProviderInput(event.toModel ?? "unknown")} (${redactProviderInput(event.errorType ?? "Error")})${event.errorMessage ? ` | ${redactProviderInput(event.errorMessage)}` : ""}`;
 }
 
 export function formatProviderHealthSummary(
@@ -177,7 +177,7 @@ export function formatProviderHealthSummary(
       const current = currentNormalized === normalized ? " [current]" : "";
       const state = typeof health.state === "string" ? health.state : "unknown";
       const failures = typeof health.failureCount === "number" ? health.failureCount : 0;
-      return `${normalized}${current}: ${state} (${failures})`;
+      return `${redactProviderInput(normalized)}${current}: ${redactProviderInput(state)} (${failures})`;
     })
     .join("; ");
 }
@@ -456,7 +456,8 @@ export function resolveProviderView(
 
 export function providerInspectViews(provider?: string): string {
   if (provider) {
-    return `/provider ${provider} | /provider perf ${provider} | /provider failovers ${provider} | /doctor ${provider}`;
+    const safeProvider = redactProviderInput(provider);
+    return `/provider ${safeProvider} | /provider perf ${safeProvider} | /provider failovers ${safeProvider} | /doctor ${safeProvider}`;
   }
   return "/provider | /provider health | /provider failovers | /provider perf | /provider current";
 }
@@ -468,11 +469,11 @@ export function renderProviderSelectionUpdated(opts: {
   currentModel: string;
 }): string {
   const lines = ["Provider selection updated:", ""];
-  lines.push(`Selected provider: ${opts.provider}`);
-  lines.push(`Selected model: ${opts.selectedModel}`);
-  lines.push(`Current provider: ${opts.currentProvider}`);
-  lines.push(`Current model: ${opts.currentModel}`);
-  lines.push(`Next run: ${opts.provider}:${opts.selectedModel} primary`);
+  lines.push(`Selected provider: ${redactProviderInput(opts.provider)}`);
+  lines.push(`Selected model: ${redactProviderInput(opts.selectedModel)}`);
+  lines.push(`Current provider: ${redactProviderInput(opts.currentProvider)}`);
+  lines.push(`Current model: ${redactProviderInput(opts.currentModel)}`);
+  lines.push(`Next run: ${redactProviderInput(opts.provider)}:${redactProviderInput(opts.selectedModel)} primary`);
   lines.push("Inspect: /provider | /provider current | /status");
   return lines.join("\n");
 }
@@ -491,7 +492,7 @@ export function renderProviderHealthView(opts: {
   } else {
     for (const health of opts.observedHealth) {
       const marker = health.current ? " (current)" : "";
-      lines.push(`${health.provider}${marker}: ${health.state} (failures: ${health.failures})`);
+      lines.push(`${redactProviderInput(health.provider)}${marker}: ${redactProviderInput(health.state)} (failures: ${health.failures})`);
     }
   }
   lines.push("");
@@ -679,10 +680,10 @@ export function renderFocusedProviderStatusView(opts: {
   performanceLine?: string;
 }): string {
   const lines = ["Provider Status:", ""];
-  lines.push(`Selected provider: ${opts.provider}`);
-  lines.push(`Configured model: ${opts.configuredModel}`);
-  lines.push(`Current provider: ${opts.currentProvider}`);
-  lines.push(`Current model: ${opts.currentModel}`);
+  lines.push(`Selected provider: ${redactProviderInput(opts.provider)}`);
+  lines.push(`Configured model: ${redactProviderInput(opts.configuredModel)}`);
+  lines.push(`Current provider: ${redactProviderInput(opts.currentProvider)}`);
+  lines.push(`Current model: ${redactProviderInput(opts.currentModel)}`);
   lines.push(`Current: ${opts.isCurrent ? "yes" : "no"}`);
   lines.push(`Selected default: ${opts.isSelectedDefault ? "yes" : "no"}`);
   if (opts.observedHealth) {
@@ -690,37 +691,37 @@ export function renderFocusedProviderStatusView(opts: {
   } else {
     lines.push("Observed health: unknown (no observations yet)");
   }
-  lines.push(`Configured failover targets: ${opts.outgoingChain.length > 0 ? opts.outgoingChain.join(", ") : "(none)"}`);
-  lines.push(`Incoming failover sources: ${opts.incomingChain.length > 0 ? opts.incomingChain.join(", ") : "(none)"}`);
+  lines.push(`Configured failover targets: ${opts.outgoingChain.length > 0 ? opts.outgoingChain.map(redactProviderInput).join(", ") : "(none)"}`);
+  lines.push(`Incoming failover sources: ${opts.incomingChain.length > 0 ? opts.incomingChain.map(redactProviderInput).join(", ") : "(none)"}`);
 
   if (opts.outgoingFailovers.length > 0) {
     lines.push("");
     lines.push("Recent outgoing failovers:");
-    for (const event of opts.outgoingFailovers) lines.push(`  ${event}`);
+    for (const event of opts.outgoingFailovers) lines.push(`  ${redactProviderInput(event)}`);
   }
   if (opts.incomingFailovers.length > 0) {
     lines.push("");
     lines.push("Recent incoming failovers:");
-    for (const event of opts.incomingFailovers) lines.push(`  ${event}`);
+    for (const event of opts.incomingFailovers) lines.push(`  ${redactProviderInput(event)}`);
   }
   if (opts.relatedChecks.length > 0) {
     lines.push("");
     lines.push("Related startup checks:");
     for (const check of opts.relatedChecks) {
-      lines.push(`  ${check.prefix}: ${check.name} - ${check.message}`.trim());
+      lines.push(`  ${redactProviderInput(check.prefix)}: ${redactProviderInput(check.name)} - ${redactProviderInput(check.message)}`.trim());
       if (!check.passed && check.fix) {
-        lines.push(`  fix: ${check.fix}`);
+        lines.push(`  fix: ${redactProviderInput(check.fix)}`);
       }
     }
   }
   if (opts.recoveryHints.length > 0) {
     lines.push("");
     lines.push("Next steps:");
-    for (const hint of opts.recoveryHints) lines.push(`  - ${hint}`);
+    for (const hint of opts.recoveryHints) lines.push(`  - ${redactProviderInput(hint)}`);
   }
   if (opts.performanceLine) {
     lines.push("");
-    lines.push(opts.performanceLine);
+    lines.push(redactProviderInput(opts.performanceLine));
   }
   return lines.join("\n");
 }
@@ -742,16 +743,16 @@ export function renderProviderSummaryView(opts: {
 }): string {
   const lines = ["Provider Status:", ""];
   if (opts.selectedProvider || opts.selectedModel) {
-    lines.push(`Selected provider: ${opts.selectedProvider ?? opts.currentProvider}`);
-    lines.push(`Selected model: ${opts.selectedModel ?? opts.currentModel}`);
+    lines.push(`Selected provider: ${redactProviderInput(opts.selectedProvider ?? opts.currentProvider)}`);
+    lines.push(`Selected model: ${redactProviderInput(opts.selectedModel ?? opts.currentModel)}`);
   }
-  lines.push(`Current provider: ${opts.currentProvider}`);
-  lines.push(`Current model: ${opts.currentModel}`);
-  lines.push(`Circuit: ${opts.circuitState}`);
+  lines.push(`Current provider: ${redactProviderInput(opts.currentProvider)}`);
+  lines.push(`Current model: ${redactProviderInput(opts.currentModel)}`);
+  lines.push(`Circuit: ${redactProviderInput(opts.circuitState)}`);
 
   if (opts.availableProviders.length > 0) {
     lines.push("");
-    lines.push(`Configured providers: ${opts.availableProviders.join(", ")}`);
+    lines.push(`Configured providers: ${opts.availableProviders.map(redactProviderInput).join(", ")}`);
     lines.push("Views: /provider health, /provider failovers, /provider perf, /provider current, /provider <name>");
     lines.push("Switch: /provider use <name> [model] | /model <model>");
   }
@@ -768,7 +769,7 @@ export function renderProviderSummaryView(opts: {
     lines.push("");
     lines.push("Failover:");
     for (const entry of opts.failoverEntries) {
-      lines.push(`  ${entry.provider} -> ${entry.chain.join(", ") || "(none)"}`);
+      lines.push(`  ${redactProviderInput(entry.provider)} -> ${entry.chain.length > 0 ? entry.chain.map(redactProviderInput).join(", ") : "(none)"}`);
     }
   }
 
@@ -776,27 +777,27 @@ export function renderProviderSummaryView(opts: {
     lines.push("");
     lines.push("Observed health:");
     for (const health of opts.observedHealth) {
-      lines.push(`  ${health.provider}: ${health.state} (failures: ${health.failures})`);
+      lines.push(`  ${redactProviderInput(health.provider)}: ${redactProviderInput(health.state)} (failures: ${health.failures})`);
     }
   }
 
   if (opts.recentFailovers.length > 0) {
     lines.push("");
     lines.push("Recent failovers:");
-    for (const event of opts.recentFailovers) lines.push(`  ${event}`);
+    for (const event of opts.recentFailovers) lines.push(`  ${redactProviderInput(event)}`);
   }
 
   if (opts.summaryHints.length > 0) {
     lines.push("");
     lines.push("Next steps:");
     for (const hint of opts.summaryHints.slice(0, 3)) {
-      lines.push(`  - ${hint}`);
+      lines.push(`  - ${redactProviderInput(hint)}`);
     }
   }
 
   if (opts.performanceLine) {
     lines.push("");
-    lines.push(opts.performanceLine);
+    lines.push(redactProviderInput(opts.performanceLine));
   }
 
   return lines.join("\n");
