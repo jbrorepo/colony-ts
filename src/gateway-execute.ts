@@ -227,6 +227,17 @@ export interface CommandExecutionHandlers {
   requestExternalChannelRegistration?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   requestExternalChannelWebhookRegistration?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   requestExternalChannelSubscriptionSetup?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestBrowserOpen?: (url: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestBrowserScreenshot?: () => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestBrowserClick?: (selector: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestBrowserType?: (selector: string, text: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestBrowserWait?: (target: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  startWorkflowRecipe?: (recipeId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  resumeWorkflowRecipe?: (runId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  cancelWorkflowRecipe?: (runId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  createGitHubPullRequest?: (runId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  activatePlugin?: (pluginId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  deactivatePlugin?: (pluginId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   showArtifactCatalog?: (
     sessionId: string,
     latest?: boolean,
@@ -254,6 +265,19 @@ function emitOptionalCommandResult(
     handlers.showErrorMessage(value.output);
   } else {
     handlers.showSystemMessage(value.output);
+  }
+}
+
+async function runOptionalHandoff(
+  label: string,
+  invoke: (() => Promise<string | CommandResult | void> | string | CommandResult | void) | undefined,
+  handlers: CommandExecutionHandlers,
+): Promise<void> {
+  if (!invoke) return;
+  try {
+    emitOptionalCommandResult(await invoke(), handlers);
+  } catch {
+    handlers.showErrorMessage(`${label} host handoff failed. Inspect host-owned logs for details.`);
   }
 }
 
@@ -428,17 +452,58 @@ export async function executeCommand(
       return true;
 
     case "browser_open":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Browser open", handlers.requestBrowserOpen ? () => handlers.requestBrowserOpen?.(action.url) : undefined, handlers);
+      return true;
+
     case "browser_screenshot":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Browser screenshot", handlers.requestBrowserScreenshot, handlers);
+      return true;
+
     case "browser_click":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Browser click", handlers.requestBrowserClick ? () => handlers.requestBrowserClick?.(action.selector) : undefined, handlers);
+      return true;
+
     case "browser_type":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Browser type", handlers.requestBrowserType ? () => handlers.requestBrowserType?.(action.selector, action.text) : undefined, handlers);
+      return true;
+
     case "browser_wait":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Browser wait", handlers.requestBrowserWait ? () => handlers.requestBrowserWait?.(action.target) : undefined, handlers);
+      return true;
+
     case "start_workflow_recipe":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Workflow start", handlers.startWorkflowRecipe ? () => handlers.startWorkflowRecipe?.(action.recipeId) : undefined, handlers);
+      return true;
+
     case "resume_workflow_recipe":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Workflow resume", handlers.resumeWorkflowRecipe ? () => handlers.resumeWorkflowRecipe?.(action.runId) : undefined, handlers);
+      return true;
+
     case "cancel_workflow_recipe":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Workflow cancel", handlers.cancelWorkflowRecipe ? () => handlers.cancelWorkflowRecipe?.(action.runId) : undefined, handlers);
+      return true;
+
     case "github_pr_create":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("GitHub PR create", handlers.createGitHubPullRequest ? () => handlers.createGitHubPullRequest?.(action.runId) : undefined, handlers);
+      return true;
+
     case "plugin_activate":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Plugin activation", handlers.activatePlugin ? () => handlers.activatePlugin?.(action.pluginId) : undefined, handlers);
+      return true;
+
     case "plugin_deactivate":
       handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Plugin deactivation", handlers.deactivatePlugin ? () => handlers.deactivatePlugin?.(action.pluginId) : undefined, handlers);
       return true;
 
     case "show_artifact": {
