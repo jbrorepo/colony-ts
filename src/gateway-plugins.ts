@@ -13,7 +13,7 @@ export interface GatewayPluginsContext {
 }
 
 export function buildPluginsCommandPayload(args: string[], context: GatewayPluginsContext = {}): GatewayBasicCommandPayload {
-  const command = (args[0] ?? "status").toLowerCase();
+  const command = normalizePluginCommand(args[0]);
   const entries = context.entries ?? [];
   const receipts = context.receipts ?? [];
   if (command === "trusted") {
@@ -96,6 +96,9 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
       },
     };
   }
+  if (command !== "status") {
+    return unknownPluginCommand(command);
+  }
   return {
     output: [
       "Plugin Status:",
@@ -115,6 +118,13 @@ function yesNo(value: boolean): string {
 }
 
 type PluginIdValidation = { ok: true; value: string } | { ok: false };
+
+function normalizePluginCommand(value: string | undefined): string {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return "status";
+  const scrubbed = scrubPluginId(raw);
+  return scrubbed.includes("[REDACTED]") ? scrubbed : scrubbed.toLowerCase();
+}
 
 function requiredPluginId(value: string | undefined): PluginIdValidation | null {
   const raw = value?.trim() ?? "";
@@ -148,6 +158,19 @@ function rejectedPluginId(command: string): GatewayBasicCommandPayload {
     ].join("\n"),
     isError: true,
     data: { action: "plugins_rejected_id" },
+  };
+}
+
+function unknownPluginCommand(command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      `Unknown plugins command '${command}'.`,
+      "",
+      "Usage: /plugins [status [id]|trusted|preflight <id>|activate <id> --approved|deactivate <id> --approved]",
+      "Next valid command: /plugins trusted | /plugins preflight <id>",
+    ].join("\n"),
+    isError: true,
+    data: { action: "plugins_usage" },
   };
 }
 
