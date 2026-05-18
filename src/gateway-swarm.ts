@@ -163,10 +163,10 @@ export function formatSwarmRuns(runs: SwarmRunSnapshot[]): string {
 
   for (const run of runs) {
     lines.push(
-      `${run.runId} | ${run.status} | ${run.executionMode ?? "coordinator_only"} | assigned ${run.assignedTaskCount}/${run.taskCount} | done ${run.completedTaskCount}/${run.taskCount} | cancelled ${run.cancelledTaskCount}`,
+      `${redactSwarmSurfaceText(run.runId)} | ${redactSwarmSurfaceText(run.status)} | ${redactSwarmSurfaceText(run.executionMode ?? "coordinator_only")} | assigned ${run.assignedTaskCount}/${run.taskCount} | done ${run.completedTaskCount}/${run.taskCount} | cancelled ${run.cancelledTaskCount}`,
     );
-    lines.push(`  ${run.title}: ${run.objective}`);
-    lines.push(`  execution ${run.execution.executionId} | workers ${run.workerCount}`);
+    lines.push(`  ${redactSwarmSurfaceText(run.title)}: ${redactSwarmSurfaceText(run.objective)}`);
+    lines.push(`  execution ${redactSwarmSurfaceText(run.execution.executionId)} | workers ${run.workerCount}`);
   }
   lines.push("Inspect: /swarm status <swarm_run_id>");
   lines.push("Resume: /swarm resume <swarm_run_id>");
@@ -181,41 +181,41 @@ export function formatSwarmRunDetail(run: SwarmRunSnapshot): string {
   const latestFailure = [...(run.stages ?? [])].reverse().find((stage) => stage.failureReason);
   const lines = [
     "Swarm Run Detail:",
-    `${run.runId} | ${run.status} | ${run.executionMode ?? "coordinator_only"}`,
+    `${redactSwarmSurfaceText(run.runId)} | ${redactSwarmSurfaceText(run.status)} | ${redactSwarmSurfaceText(run.executionMode ?? "coordinator_only")}`,
     "Run Summary:",
-    `Title: ${run.title}`,
-    `Objective: ${run.objective}`,
-    `Execution: ${run.execution.executionId}`,
+    `Title: ${redactSwarmSurfaceText(run.title)}`,
+    `Objective: ${redactSwarmSurfaceText(run.objective)}`,
+    `Execution: ${redactSwarmSurfaceText(run.execution.executionId)}`,
     `Workers: ${run.workerCount}`,
     `Progress: ${run.completedTaskCount}/${run.taskCount} complete | failed ${run.failedTaskCount} | cancelled ${run.cancelledTaskCount}`,
     `Usage: tokens ${tokenTotal} | cost $${costTotal.toFixed(4)}`,
-    `Latest failure: ${latestFailure ? `${latestFailure.stage} - ${latestFailure.failureReason}` : "none"}`,
+    `Latest failure: ${latestFailure ? `${redactSwarmSurfaceText(latestFailure.stage)} - ${redactSwarmSurfaceText(latestFailure.failureReason ?? "unknown")}` : "none"}`,
     `Tasks: assigned ${run.assignedTaskCount}/${run.taskCount} | done ${run.completedTaskCount}/${run.taskCount} | failed ${run.failedTaskCount} | cancelled ${run.cancelledTaskCount}`,
     "Stage Details:",
     "Stage Timeline:",
   ];
   for (const stage of run.stages ?? []) {
     lines.push(
-      `- ${stage.stage} | ${stage.status} | attempts ${stage.attempts} | artifacts ${stage.artifactCount}${formatStageTiming(stage)}${formatStageUsage(stage)}`,
+      `- ${redactSwarmSurfaceText(stage.stage)} | ${redactSwarmSurfaceText(stage.status)} | attempts ${stage.attempts} | artifacts ${stage.artifactCount}${formatStageTiming(stage)}${formatStageUsage(stage)}`,
     );
-    if (stage.summary) lines.push(`  summary: ${stage.summary}`);
-    if (stage.failureReason) lines.push(`  failure: ${stage.failureReason}`);
-    if (stage.awaitingApproval?.reason) lines.push(`  approval: ${stage.awaitingApproval.reason}`);
+    if (stage.summary) lines.push(`  summary: ${redactSwarmSurfaceText(stage.summary)}`);
+    if (stage.failureReason) lines.push(`  failure: ${redactSwarmSurfaceText(stage.failureReason)}`);
+    if (stage.awaitingApproval?.reason) lines.push(`  approval: ${redactSwarmSurfaceText(stage.awaitingApproval.reason)}`);
     if (stage.artifactReview && stage.artifactReview.length > 0) {
       lines.push("  Artifact Review:");
       lines.push("  artifacts:");
       for (const artifact of stage.artifactReview) {
-        const uri = artifact.uri ? ` | uri ${artifact.uri}` : "";
-        const metadata = artifact.metadataKeys.length > 0 ? ` | metadata ${artifact.metadataKeys.join(",")}` : "";
-        lines.push(`    - ${artifact.name} (${artifact.type}) | bytes ${artifact.contentBytes}${uri}${metadata}`);
-        if (artifact.preview) lines.push(`      preview: ${artifact.preview}`);
+        const uri = artifact.uri ? ` | uri ${redactSwarmSurfaceText(artifact.uri)}` : "";
+        const metadata = artifact.metadataKeys.length > 0 ? ` | metadata ${artifact.metadataKeys.map(redactSwarmSurfaceText).join(",")}` : "";
+        lines.push(`    - ${redactSwarmSurfaceText(artifact.name)} (${redactSwarmSurfaceText(artifact.type)}) | bytes ${artifact.contentBytes}${uri}${metadata}`);
+        if (artifact.preview) lines.push(`      preview: ${redactSwarmSurfaceText(artifact.preview)}`);
       }
     }
     if (stage.retryHistory && stage.retryHistory.length > 0) {
-      lines.push("  retry history:");
+    lines.push("  retry history:");
       for (const attempt of stage.retryHistory) {
-        const reason = attempt.failureReason ? `: ${attempt.failureReason}` : "";
-        lines.push(`    attempt ${attempt.attempt} ${attempt.status}${reason}`);
+        const reason = attempt.failureReason ? `: ${redactSwarmSurfaceText(attempt.failureReason)}` : "";
+        lines.push(`    attempt ${attempt.attempt} ${redactSwarmSurfaceText(attempt.status)}${reason}`);
       }
     }
   }
@@ -223,13 +223,13 @@ export function formatSwarmRunDetail(run: SwarmRunSnapshot): string {
   lines.push("Resume: /swarm resume <swarm_run_id>");
   lines.push("Retry: /swarm retry <swarm_run_id> <plan|execute|review>");
   lines.push("Cancel: /swarm cancel <swarm_run_id>");
-  if (latestFailure) lines.push(`Suggested retry: /swarm retry ${run.runId} ${latestFailure.stage}`);
+  if (latestFailure) lines.push(`Suggested retry: /swarm retry ${redactSwarmSurfaceText(run.runId)} ${redactSwarmSurfaceText(latestFailure.stage)}`);
   return lines.join("\n");
 }
 
 function formatStageTiming(stage: SwarmRunSnapshot["stages"][number]): string {
-  const started = stage.startedAt ? ` | started ${stage.startedAt}` : "";
-  const ended = stage.endedAt ? ` | ended ${stage.endedAt}` : "";
+  const started = stage.startedAt ? ` | started ${redactSwarmSurfaceText(stage.startedAt)}` : "";
+  const ended = stage.endedAt ? ` | ended ${redactSwarmSurfaceText(stage.endedAt)}` : "";
   return `${started}${ended}`;
 }
 
@@ -242,4 +242,10 @@ function formatStageUsage(stage: SwarmRunSnapshot["stages"][number]): string {
 function normalizeStage(value: string): SwarmStage | null {
   if (value === "plan" || value === "execute" || value === "review") return value;
   return null;
+}
+
+function redactSwarmSurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
