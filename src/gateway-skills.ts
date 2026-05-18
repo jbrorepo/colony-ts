@@ -52,9 +52,17 @@ export function buildSkillsCommandPayload(
   }
 
   if (command === "search") {
-    const query = args.slice(1).join(" ").trim();
+    const query = normalizeSkillSearchQuery(args.slice(1));
     if (!query) {
-      return { output: "Usage: /skills search <query>", isError: true, data: { action: "skills_usage" } };
+      return {
+        output: [
+          "Skill search query required.",
+          "",
+          "Next valid command: /skills search <query>",
+        ].join("\n"),
+        isError: true,
+        data: { action: "skills_search_missing_query" },
+      };
     }
     const matches = searchSkills(skills, query);
     return {
@@ -166,6 +174,13 @@ function isSkillDocsMutationArgument(value: string): boolean {
     "install",
     "promote",
   ].includes(normalized);
+}
+
+function normalizeSkillSearchQuery(values: string[]): string | null {
+  const meaningful = values.filter((value) => !value.trim().startsWith("--"));
+  const query = meaningful.join(" ").trim();
+  if (!query) return null;
+  return redactSkillLookupText(query);
 }
 
 function resolveSkills(context: GatewaySkillsContext): SkillDefinition[] {
