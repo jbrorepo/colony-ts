@@ -106,8 +106,8 @@ function normalizeRuntimeViewInput(value: string): string {
 
 function redactRuntimeSurfaceText(value: string): string {
   return scrubSecrets(value)
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
 
 function normalizeRuntimeViewArgs(args: string[]): string[] {
@@ -172,18 +172,21 @@ export function renderStatusViewOutput(opts: {
   savedLines: string[];
   runtimeLines: string[];
 }): string {
+  const sessionLines = opts.sessionLines.map(redactRuntimeSurfaceText);
+  const savedLines = opts.savedLines.map(redactRuntimeSurfaceText);
+  const runtimeLines = opts.runtimeLines.map(redactRuntimeSurfaceText);
   const lines = opts.view === "session"
-    ? opts.sessionLines
+    ? sessionLines
     : opts.view === "saved"
-      ? opts.savedLines
+      ? savedLines
       : opts.view === "runtime" || opts.view === "operator"
-        ? opts.runtimeLines
+        ? runtimeLines
         : [
-            ...opts.sessionLines,
+            ...sessionLines,
             "",
-            ...opts.savedLines,
+            ...savedLines,
             "",
-            ...opts.runtimeLines,
+            ...runtimeLines,
           ];
   lines.push("");
   lines.push(`Views: ${statusInspectViews()}`);
@@ -197,21 +200,21 @@ export function renderStatusSessionSection(section: GatewayStatusSessionSection)
     return lines;
   }
 
-  lines.push(`Session ID: ${section.sessionId ?? "unknown"}`);
-  lines.push(`Agent: ${section.agentId ?? "unknown"}`);
-  lines.push(`Caste: ${section.caste ?? "unknown"}`);
+  lines.push(`Session ID: ${redactRuntimeSurfaceText(section.sessionId ?? "unknown")}`);
+  lines.push(`Agent: ${redactRuntimeSurfaceText(section.agentId ?? "unknown")}`);
+  lines.push(`Caste: ${redactRuntimeSurfaceText(section.caste ?? "unknown")}`);
   lines.push(`Messages: ${section.messageCount ?? 0}`);
   if (section.startedAt) {
-    lines.push(`Session started: ${section.startedAt}`);
+    lines.push(`Session started: ${redactRuntimeSurfaceText(section.startedAt)}`);
   }
   if (section.latestMessageAt) {
-    lines.push(`Latest live message: ${section.latestMessageAt}`);
+    lines.push(`Latest live message: ${redactRuntimeSurfaceText(section.latestMessageAt)}`);
   }
   if (section.currentState) {
-    lines.push(`Current state: ${section.currentState}`);
+    lines.push(`Current state: ${redactRuntimeSurfaceText(section.currentState)}`);
   }
   if (section.latestPreview) {
-    lines.push(`Latest live preview: ${section.latestPreview}`);
+    lines.push(`Latest live preview: ${redactRuntimeSurfaceText(section.latestPreview)}`);
   }
   return lines;
 }
@@ -228,32 +231,32 @@ export function renderStatusSavedSection(section: GatewayStatusSavedSection): st
   lines.push(`With checkpoints: ${section.checkpointCount ?? 0}`);
 
   if (section.latest) {
-    lines.push(`Latest: ${section.latest.sessionId}${section.latest.isCurrent ? " (current)" : ""}`);
-    lines.push(`Latest identity: ${section.latest.identity}`);
-    lines.push(`Latest saved: ${section.latest.savedAt}`);
-    lines.push(`Latest message: ${section.latest.lastMessageAt}`);
-    lines.push(`Latest state: ${section.latest.state}`);
-    lines.push(`Latest usage: ${section.latest.usage}`);
-    if (section.latest.llm) lines.push(`Latest llm: ${section.latest.llm}`);
-    if (section.latest.preview) lines.push(`Latest preview: ${section.latest.preview}`);
-    if (section.latest.actionLine) lines.push(section.latest.actionLine);
+    lines.push(`Latest: ${redactRuntimeSurfaceText(section.latest.sessionId)}${section.latest.isCurrent ? " (current)" : ""}`);
+    lines.push(`Latest identity: ${redactRuntimeSurfaceText(section.latest.identity)}`);
+    lines.push(`Latest saved: ${redactRuntimeSurfaceText(section.latest.savedAt)}`);
+    lines.push(`Latest message: ${redactRuntimeSurfaceText(section.latest.lastMessageAt)}`);
+    lines.push(`Latest state: ${redactRuntimeSurfaceText(section.latest.state)}`);
+    lines.push(`Latest usage: ${redactRuntimeSurfaceText(section.latest.usage)}`);
+    if (section.latest.llm) lines.push(`Latest llm: ${redactRuntimeSurfaceText(section.latest.llm)}`);
+    if (section.latest.preview) lines.push(`Latest preview: ${redactRuntimeSurfaceText(section.latest.preview)}`);
+    if (section.latest.actionLine) lines.push(redactRuntimeSurfaceText(section.latest.actionLine));
   }
 
   if (section.pending) {
-    lines.push(`Pending target: ${section.pending.sessionId}${section.pending.isCurrent ? " (current)" : ""}`);
-    lines.push(`Pending identity: ${section.pending.identity}`);
-    lines.push(`Pending saved: ${section.pending.savedAt}`);
-    lines.push(`Pending message: ${section.pending.lastMessageAt}`);
-    lines.push(`Pending state: ${section.pending.state}`);
-    lines.push(`Pending usage: ${section.pending.usage}`);
-    if (section.pending.llm) lines.push(`Pending llm: ${section.pending.llm}`);
-    if (section.pending.preview) lines.push(`Pending preview: ${section.pending.preview}`);
-    if (section.pending.recoverLine) lines.push(section.pending.recoverLine);
-    if (section.pending.inspectLine) lines.push(section.pending.inspectLine);
+    lines.push(`Pending target: ${redactRuntimeSurfaceText(section.pending.sessionId)}${section.pending.isCurrent ? " (current)" : ""}`);
+    lines.push(`Pending identity: ${redactRuntimeSurfaceText(section.pending.identity)}`);
+    lines.push(`Pending saved: ${redactRuntimeSurfaceText(section.pending.savedAt)}`);
+    lines.push(`Pending message: ${redactRuntimeSurfaceText(section.pending.lastMessageAt)}`);
+    lines.push(`Pending state: ${redactRuntimeSurfaceText(section.pending.state)}`);
+    lines.push(`Pending usage: ${redactRuntimeSurfaceText(section.pending.usage)}`);
+    if (section.pending.llm) lines.push(`Pending llm: ${redactRuntimeSurfaceText(section.pending.llm)}`);
+    if (section.pending.preview) lines.push(`Pending preview: ${redactRuntimeSurfaceText(section.pending.preview)}`);
+    if (section.pending.recoverLine) lines.push(redactRuntimeSurfaceText(section.pending.recoverLine));
+    if (section.pending.inspectLine) lines.push(redactRuntimeSurfaceText(section.pending.inspectLine));
   }
 
   if (section.inspectLine) {
-    lines.push(section.inspectLine);
+    lines.push(redactRuntimeSurfaceText(section.inspectLine));
   }
   return lines;
 }
