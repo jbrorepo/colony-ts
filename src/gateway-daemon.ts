@@ -82,9 +82,9 @@ export function buildDaemonCommandPayload(
 function renderDaemonOverview(context: GatewayDaemonContext): string {
   const auth = context.auth;
   const lines = ["Daemon Control Plane:", ""];
-  lines.push(`Endpoint: ${context.endpoint ?? "not configured"}`);
-  lines.push(`Transport: ${context.transport ?? "unknown"}`);
-  if (context.startedAt) lines.push(`Started: ${context.startedAt}`);
+  lines.push(`Endpoint: ${redactDaemonSurfaceText(context.endpoint ?? "not configured")}`);
+  lines.push(`Transport: ${redactDaemonSurfaceText(context.transport ?? "unknown")}`);
+  if (context.startedAt) lines.push(`Started: ${redactDaemonSurfaceText(context.startedAt)}`);
   lines.push(`Capabilities: ${formatList(context.capabilities)}`);
   lines.push(`Auth: ${auth?.required ? "required" : "not configured"}`);
   lines.push(`Tokens: ${auth?.tokenCount ?? auth?.tokens?.length ?? 0}`);
@@ -105,15 +105,15 @@ function renderDaemonAuthView(context: GatewayDaemonContext): string {
     lines.push("No scoped tokens configured in this runtime snapshot.");
   } else {
     for (const token of tokens) {
-      const expiry = token.expiresAt ? ` | expires ${token.expiresAt}${token.expired ? " (expired)" : ""}` : "";
-      lines.push(`- ${token.label ?? "unnamed"} | scopes ${formatList(token.scopes)}${expiry}`);
+      const expiry = token.expiresAt ? ` | expires ${redactDaemonSurfaceText(token.expiresAt)}${token.expired ? " (expired)" : ""}` : "";
+      lines.push(`- ${redactDaemonSurfaceText(token.label ?? "unnamed")} | scopes ${formatList(token.scopes)}${expiry}`);
     }
   }
 
   if (context.lastAuthFailure) {
-    const required = context.lastAuthFailure.requiredScope ? ` | required ${context.lastAuthFailure.requiredScope}` : "";
-    lines.push(`Last auth failure: ${context.lastAuthFailure.code ?? "unknown"}${required}`);
-    if (context.lastAuthFailure.message) lines.push(`Reason: ${context.lastAuthFailure.message}`);
+    const required = context.lastAuthFailure.requiredScope ? ` | required ${redactDaemonSurfaceText(context.lastAuthFailure.requiredScope)}` : "";
+    lines.push(`Last auth failure: ${redactDaemonSurfaceText(context.lastAuthFailure.code ?? "unknown")}${required}`);
+    if (context.lastAuthFailure.message) lines.push(`Reason: ${redactDaemonSurfaceText(context.lastAuthFailure.message)}`);
   }
 
   lines.push("");
@@ -136,7 +136,7 @@ function renderDaemonSessionsView(context: GatewayDaemonContext): string {
           session.tenantScope ?? "default",
           `${session.messageCount ?? 0} messages`,
           session.agentId ?? "unknown-agent",
-        ].join(" | "),
+        ].map(redactDaemonSurfaceText).join(" | "),
       );
     }
   }
@@ -146,7 +146,13 @@ function renderDaemonSessionsView(context: GatewayDaemonContext): string {
 }
 
 function formatList(values?: string[]): string {
-  return values && values.length > 0 ? values.join(", ") : "none";
+  return values && values.length > 0 ? values.map(redactDaemonSurfaceText).join(", ") : "none";
+}
+
+function redactDaemonSurfaceText(value: string): string {
+  return scrubSecrets(value)
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
 
 function normalizeDaemonViewArgs(args: string[]): string[] {
