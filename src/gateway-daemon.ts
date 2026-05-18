@@ -1,4 +1,5 @@
 import type { GatewayBasicCommandPayload } from "./gateway-basic";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayDaemonAuthTokenView {
   label?: string;
@@ -40,10 +41,18 @@ export function buildDaemonCommandPayload(
   args: string[],
   daemon?: GatewayDaemonContext | null,
 ): GatewayBasicCommandPayload {
-  const view = (args[0] ?? "overview").toLowerCase();
-  if (args.length > 1 || !["overview", "status", "auth", "sessions"].includes(view)) {
+  const normalizedArgs = normalizeDaemonViewArgs(args);
+  const view = normalizeDaemonViewInput(normalizedArgs[0] ?? "overview");
+  if (normalizedArgs.length > 1) {
     return {
       output: "Usage: /daemon [status|auth|sessions]",
+      isError: true,
+      data: { action: "daemon_usage" },
+    };
+  }
+  if (!["overview", "status", "auth", "sessions"].includes(view)) {
+    return {
+      output: `Unknown daemon view '${view}'.\n\nUsage: /daemon [status|auth|sessions]`,
       isError: true,
       data: { action: "daemon_usage" },
     };
@@ -138,4 +147,15 @@ function renderDaemonSessionsView(context: GatewayDaemonContext): string {
 
 function formatList(values?: string[]): string {
   return values && values.length > 0 ? values.join(", ") : "none";
+}
+
+function normalizeDaemonViewArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeDaemonViewInput(value: string): string {
+  const redacted = scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }

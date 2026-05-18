@@ -12,6 +12,7 @@ import type {
   ExternalChannelWebhookRegistrationPlan,
 } from "./channel";
 import { listChannelAdapterContractStatus } from "./channel";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayChannelsContext {
   registry?: ChannelRegistry | null;
@@ -30,15 +31,16 @@ export function buildChannelsCommandPayload(
   args: string[],
   channels?: GatewayChannelsContext | null,
 ): GatewayBasicCommandPayload {
-  const view = (args[0] ?? "overview").toLowerCase();
+  const normalizedArgs = normalizeChannelViewArgs(args);
+  const view = normalizeChannelViewInput(normalizedArgs[0] ?? "overview");
   if (!["overview", "status", "deliveries", "auth", "sessions", "contracts", "external"].includes(view)) {
     return {
-      output: "Usage: /channels [status|deliveries|auth|sessions|contracts|external]",
+      output: `Unknown channels view '${view}'.\n\nUsage: /channels [status|deliveries|auth|sessions|contracts|external]`,
       isError: true,
       data: { action: "channels_usage" },
     };
   }
-  if (view !== "external" && args.length > 1) {
+  if (view !== "external" && normalizedArgs.length > 1) {
     return {
       output: "Usage: /channels [status|deliveries|auth|sessions|contracts|external]",
       isError: true,
@@ -96,9 +98,9 @@ export function buildChannelsCommandPayload(
     const externalAdapters = channels?.externalAdapters ?? [];
     const externalWebhooks = channels?.externalWebhooks ?? [];
     const externalSubscriptions = channels?.externalSubscriptions ?? [];
-    const subcommand = (args[1] ?? "").toLowerCase();
+    const subcommand = normalizeChannelViewInput(normalizedArgs[1] ?? "");
     if (subcommand) {
-      return buildExternalSubcommand(args.slice(1), externalAdapters, externalWebhooks, externalSubscriptions);
+      return buildExternalSubcommand(normalizedArgs.slice(1), externalAdapters, externalWebhooks, externalSubscriptions);
     }
     return {
       output: renderExternalAdapters(externalAdapters, externalWebhooks, externalSubscriptions),
@@ -755,6 +757,17 @@ function sanitizeLine(value: string): string {
 
 function normalizeChannelId(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function normalizeChannelViewArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeChannelViewInput(value: string): string {
+  const redacted = scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
 function isSupportedExternalChannel(value: string): boolean {
