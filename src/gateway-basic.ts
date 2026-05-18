@@ -200,7 +200,8 @@ export function buildBudgetCommandPayload(opts: {
   maxUsd: number | null;
   maxTokens: number | null;
 }): GatewayBasicCommandPayload {
-  if (opts.args.length === 0) {
+  const args = opts.args.filter((arg) => !arg.trim().startsWith("--"));
+  if (args.length === 0) {
     const lines = ["Budget:"];
     if (typeof opts.maxUsd === "number" && Number.isFinite(opts.maxUsd) && opts.maxUsd > 0) {
       lines.push(`Cost cap: $${opts.maxUsd.toFixed(2)}`);
@@ -221,7 +222,7 @@ export function buildBudgetCommandPayload(opts: {
     };
   }
 
-  const cap = Number.parseFloat(opts.args[0] ?? "");
+  const cap = Number.parseFloat(args[0] ?? "");
   if (!Number.isFinite(cap) || cap <= 0) {
     return {
       output: "Usage: /budget <positive USD cap>",

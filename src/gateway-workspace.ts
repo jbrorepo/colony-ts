@@ -34,12 +34,30 @@ export interface GatewayWorkspaceView {
   markers?: string[];
 }
 
+function redactWorkspaceInput(value: string): string {
+  return value.trim()
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\b(?:sk|xox[baprs])-[A-Za-z0-9._-]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeWorkspaceToken(value: string | undefined): string {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return "";
+  const redacted = redactWorkspaceInput(raw);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeWorkspaceArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 export function workspaceInspectViews(): string {
   return "/workspace | /workspace packages | /workspace dev | /workspace verify";
 }
 
 export function resolveWorkspaceView(args: string[]): WorkspaceViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeWorkspaceToken(normalizeWorkspaceArgs(args)[0]);
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "packages" || raw === "pkg") return "packages";
   if (raw === "dev" || raw === "develop") return "dev";
