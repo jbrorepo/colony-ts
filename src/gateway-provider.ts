@@ -228,6 +228,10 @@ function normalizeProviderSelectionInput(value: string | undefined): string | nu
   return redactProviderInput(normalized);
 }
 
+function normalizeProviderViewArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 function providerPerfCandidateModels(
   provider: string,
   runtime: ProviderCommandRuntime,
@@ -837,7 +841,7 @@ export function buildProviderCommandPayload(opts: {
     };
   }
 
-  const view = resolveProviderView(opts.args, runtime);
+  const view = resolveProviderView(normalizeProviderViewArgs(opts.args), runtime);
   if ("error" in view) {
     return {
       output: view.error,
