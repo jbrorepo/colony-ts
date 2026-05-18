@@ -81,16 +81,30 @@ export function buildWorkflowCommandPayload(opts: {
   const view = resolveWorkflowView(opts.args);
   if (typeof view === "object") {
     if ("startRecipe" in view) {
+      const recipe = getWorkflowRecipe(view.startRecipe);
+      if (!recipe) {
+        return {
+          output: [
+            `Unknown workflow recipe: ${view.startRecipe || "(missing)"}`,
+            "",
+            "Next valid command: /workflow recipes",
+            "",
+            `Views: ${workflowInspectViews()}`,
+          ].join("\n"),
+          isError: true,
+          data: { view: "start", recipe: view.startRecipe, known: false },
+        };
+      }
       return {
         output: [
           "Workflow Recipe Start:",
           "",
-          `Recipe: ${view.startRecipe}`,
+          `Recipe: ${recipe.id}`,
           opts.recipeRuntime ? "Runtime: available" : "Runtime: unavailable in this context",
           "Next valid command: /workflow inspect <run_id> | /workflow resume <run_id>",
         ].join("\n"),
-        data: { view: "start", recipe: view.startRecipe },
-        action: { kind: "start_workflow_recipe", recipeId: view.startRecipe },
+        data: { view: "start", recipe: recipe.id },
+        action: { kind: "start_workflow_recipe", recipeId: recipe.id },
       };
     }
     if ("resumeRun" in view || "cancelRun" in view) {
