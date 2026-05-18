@@ -3,6 +3,7 @@ import {
   normalizeCompactionStrategy,
   type CompactionStrategy,
 } from "./runtime/compaction";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayCompactEvent {
   strategy: string;
@@ -260,10 +261,11 @@ export function buildCompactCommandPayload(opts: {
   } | null;
   noActiveHint?: string;
 }): GatewayCompactCommandPayload {
-  const rawStrategy = opts.args[0]?.trim().toLowerCase() ?? "";
+  const args = normalizeCompactInspectionArgs(opts.args);
+  const rawStrategy = normalizeCompactStrategyInput(args[0] ?? "");
 
   if (rawStrategy === "handoff") {
-    if (opts.args.length > 1) {
+    if (args.length > 1) {
       return {
         output: "Usage: /compact handoff",
         isError: true,
@@ -276,7 +278,7 @@ export function buildCompactCommandPayload(opts: {
   }
 
   if (rawStrategy === "recent") {
-    if (opts.args.length > 1) {
+    if (args.length > 1) {
       return {
         output: "Usage: /compact recent",
         isError: true,
@@ -289,7 +291,7 @@ export function buildCompactCommandPayload(opts: {
   }
 
   if (rawStrategy === "status") {
-    if (opts.args.length > 1) {
+    if (args.length > 1) {
       return {
         output: "Usage: /compact [standard|micro|reactive|session_memory|cached_micro|context_collapse|smart|status|recent|handoff]",
         isError: true,
@@ -342,9 +344,9 @@ export function buildCompactCommandPayload(opts: {
         ? "smart"
         : normalizedStrategy;
 
-  if (!requestedStrategy || opts.args.length > 1) {
+  if (!requestedStrategy || args.length > 1) {
     return {
-      output: renderCompactUsage(),
+      output: `Unknown compact strategy '${rawStrategy || "[empty]"}'.\n\n${renderCompactUsage()}`,
       isError: true,
     };
   }
@@ -449,4 +451,16 @@ export function buildCompactCommandPayload(opts: {
     },
     action: { kind: "compact", strategy },
   };
+}
+
+function normalizeCompactInspectionArgs(args: string[]): string[] {
+  if (!args[0] || args[0].trim().startsWith("--")) return args;
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeCompactStrategyInput(value: string): string {
+  const redacted = scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }

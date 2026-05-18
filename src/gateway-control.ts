@@ -27,6 +27,7 @@ import {
 } from "./memory/service";
 import type { AgentSession } from "./runtime/session";
 import { renderModelStatusView } from "./gateway-runtime";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayControlCommandPayload {
   output: string;
@@ -219,8 +220,9 @@ export function buildMemoryCommandPayload(opts: {
   }
 
   const currentMode = opts.runtime.memoryTruthModeOverride ?? null;
-  const viewArg = opts.args.join(" ").trim().toLowerCase();
-  if (opts.args.length === 0 || viewArg === "status") {
+  const args = normalizeMemoryCommandArgs(opts.args);
+  const viewArg = normalizeMemoryCommandInput(args.join(" "));
+  if (args.length === 0 || viewArg === "status") {
     return {
       output: renderMemoryStatusView(currentMode, opts.runtime.lastMemoryRecall ?? null),
       data: {
@@ -243,8 +245,8 @@ export function buildMemoryCommandPayload(opts: {
     };
   }
 
-  if (opts.args[0]?.toLowerCase() === "plan" || opts.args[0]?.toLowerCase() === "explain") {
-    const query = opts.args.slice(1).join(" ").trim();
+  if (normalizeMemoryCommandInput(args[0] ?? "") === "plan" || normalizeMemoryCommandInput(args[0] ?? "") === "explain") {
+    const query = args.slice(1).join(" ").trim();
     if (!query) {
       return {
         output: `Usage: /memory plan <query>\n\nViews: ${memoryInspectViews()}`,
@@ -258,10 +260,11 @@ export function buildMemoryCommandPayload(opts: {
     };
   }
 
-  const requestedMode = parseMemoryTruthModeInput(opts.args.join(" "));
+  const requestedMode = parseMemoryTruthModeInput(args.join(" "));
   if (requestedMode === undefined) {
+    const rejectedInput = viewArg.includes("[REDACTED]") ? "\nInput: [REDACTED]" : "";
     return {
-      output: `Unknown memory mode.\n\nViews: ${memoryInspectViews()}`,
+      output: `Unknown memory mode.${rejectedInput}\n\nViews: ${memoryInspectViews()}`,
       isError: true,
     };
   }
@@ -344,6 +347,17 @@ function renderMemoryQueryPlan(
   ];
 
   return lines.join("\n");
+}
+
+function normalizeMemoryCommandArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeMemoryCommandInput(value: string): string {
+  const redacted = scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
 function inferMemoryRecallControlPlan(input: {
