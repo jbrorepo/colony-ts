@@ -9,13 +9,19 @@ export interface GatewayGitHubContext {
 }
 
 export function buildGitHubCommandPayload(args: string[], context: GatewayGitHubContext = {}): GatewayBasicCommandPayload {
-  const scope = (args[0] ?? "status").toLowerCase();
-  const action = (args[1] ?? "").toLowerCase();
+  const scope = normalizeGitHubCommandToken(args[0], "status");
+  const action = normalizeGitHubCommandToken(args[1], "");
   if (scope === "issue" && action === "plan") {
     return buildGitHubIssuePlanPayload(args.slice(2), context);
   }
+  if (scope === "issue") {
+    return unknownGitHubCommand([scope, action].filter(Boolean), "/github issue plan <owner>/<repo>#<n>");
+  }
   if (scope === "workspace" && action === "approve") {
     return buildGitHubWorkspaceApprovalPayload(args[2]);
+  }
+  if (scope === "workspace") {
+    return unknownGitHubCommand([scope, action].filter(Boolean), "/github workspace approve <signature>");
   }
   if (scope === "pr" && action === "plan") {
     const runId = requiredGitHubPrIdentifier(args[2]);
@@ -63,6 +69,12 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
       data: { action: "github_pr_status", receiptId: receiptId.value },
     };
   }
+  if (scope === "pr") {
+    return unknownGitHubCommand([scope, action].filter(Boolean), "/github pr plan <run_id>");
+  }
+  if (scope !== "status") {
+    return unknownGitHubCommand([scope], "/github issue plan <owner>/<repo>#<n>");
+  }
   return {
     output: [
       "GitHub Distribution:",
@@ -81,6 +93,13 @@ function requiredIdentifier(value: string | undefined): string | null {
 }
 
 type GitHubPrIdentifierValidation = { ok: true; value: string } | { ok: false };
+
+function normalizeGitHubCommandToken(value: string | undefined, fallback: string): string {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return fallback;
+  const scrubbed = scrubGitHubApprovalSignature(raw);
+  return scrubbed.includes("[REDACTED]") ? scrubbed : scrubbed.toLowerCase();
+}
 
 function requiredGitHubPrIdentifier(value: string | undefined): GitHubPrIdentifierValidation | null {
   const identifier = requiredIdentifier(value);
@@ -114,6 +133,20 @@ function rejectedGitHubIdentifier(label: string, command: string): GatewayBasicC
     ].join("\n"),
     isError: true,
     data: { action: "github_rejected_identifier", label },
+  };
+}
+
+function unknownGitHubCommand(parts: string[], nextCommand: string): GatewayBasicCommandPayload {
+  const command = parts.length > 0 ? parts.join(" ") : "status";
+  return {
+    output: [
+      `Unknown GitHub command '${command}'.`,
+      "",
+      "Usage: /github [status|issue plan <owner>/<repo>#<n>|workspace approve <signature>|pr plan <run_id>|pr create <run_id> --approved|pr status <receipt_id>]",
+      `Next valid command: ${nextCommand}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "github_usage" },
   };
 }
 
