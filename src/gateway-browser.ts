@@ -175,15 +175,17 @@ export function buildBrowserCommandPayload(
   }
 
   if (command === "wait") {
+    const target = args.slice(1).filter((arg) => !arg.startsWith("--")).join(" ").trim();
+    if (!target) return missingBrowserArgument("Browser wait target", "/browser wait <selector|ms>");
     return {
       output: [
         "Browser wait boundary recorded.",
         "",
-        `Target: ${args.slice(1).join(" ") || "unspecified"}`,
+        `Target: ${target}`,
         "Next valid command: /browser read | /browser stop",
       ].join("\n"),
       data: { action: "browser_wait" },
-      action: { kind: "browser_wait", target: args.slice(1).join(" ") || "unspecified" },
+      action: { kind: "browser_wait", target },
     };
   }
 
