@@ -9,6 +9,7 @@ import {
   type BrowserSidecarSnapshot,
   validateBrowserAutomationUrl,
 } from "./browser/browser-sidecar-runtime";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayBrowserContext {
   runtime?: BrowserSidecarRuntime | null;
@@ -18,11 +19,12 @@ export function buildBrowserCommandPayload(
   args: string[],
   context: GatewayBrowserContext = {},
 ): GatewayBasicCommandPayload {
-  const command = (args[0] ?? "status").toLowerCase();
+  const commandArgs = normalizeBrowserCommandArgs(args);
+  const command = normalizeBrowserCommandInput(commandArgs[0] ?? "status");
   const descriptor = createDefaultBrowserSidecarDescriptor();
   const runtime = context.runtime ?? new BrowserSidecarRuntime();
 
-  if (args.length === 0 || command === "status") {
+  if (commandArgs.length === 0 || command === "status") {
     return {
       output: renderBrowserStatus(descriptor, runtime.snapshot()),
       data: {
@@ -88,7 +90,7 @@ export function buildBrowserCommandPayload(
   }
 
   if (command === "open") {
-    const rawUrl = args.find((arg, index) => index > 0 && !arg.startsWith("--")) ?? "";
+    const rawUrl = commandArgs[1] ?? "";
     if (!rawUrl) return missingBrowserArgument("Browser URL", "/browser open <url> --approved");
     const policy = validateBrowserAutomationUrl(rawUrl);
     if (!policy.ok) return rejectedBrowserArgument(policy.reason, "/browser open <url> --approved");
@@ -149,9 +151,9 @@ export function buildBrowserCommandPayload(
 
   if (command === "click" || command === "type") {
     const approved = args.includes("--approved");
-    const selector = args[1]?.trim() ?? "";
+    const selector = commandArgs[1]?.trim() ?? "";
     if (!selector || selector.startsWith("--")) return missingBrowserArgument("Browser selector", `/browser ${command} <selector> --approved`);
-    const text = command === "type" ? args.slice(2).filter((arg) => arg !== "--approved").join(" ").trim() : "";
+    const text = command === "type" ? commandArgs.slice(2).join(" ").trim() : "";
     if (command === "type" && !text) return missingBrowserArgument("Browser type text", "/browser type <selector> <text> --approved");
     return {
       output: [
@@ -175,7 +177,7 @@ export function buildBrowserCommandPayload(
   }
 
   if (command === "wait") {
-    const target = args.slice(1).filter((arg) => !arg.startsWith("--")).join(" ").trim();
+    const target = commandArgs.slice(1).join(" ").trim();
     if (!target) return missingBrowserArgument("Browser wait target", "/browser wait <selector|ms>");
     return {
       output: [
@@ -227,10 +229,21 @@ export function buildBrowserCommandPayload(
   }
 
   return {
-    output: "Usage: /browser [status|start --approved|open <url> --approved|read|screenshot --approved|click <selector> --approved|type <selector> <text> --approved|wait <selector|ms>|artifacts|stop|scopes|contract]",
+    output: `Unknown browser command '${command}'.\n\nUsage: /browser [status|start --approved|open <url> --approved|read|screenshot --approved|click <selector> --approved|type <selector> <text> --approved|wait <selector|ms>|artifacts|stop|scopes|contract]`,
     isError: true,
     data: { action: "browser_usage" },
   };
+}
+
+function normalizeBrowserCommandArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeBrowserCommandInput(value: string): string {
+  const redacted = scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
 function renderBrowserStatus(descriptor: BrowserSidecarDescriptor, snapshot: BrowserSidecarSnapshot): string {

@@ -5,11 +5,13 @@ import {
   nextGstackInspiredCapability,
   type GstackInspiredCapability,
 } from "./gstack-inspired-capabilities";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export function buildCapabilitiesCommandPayload(args: string[]): GatewayBasicCommandPayload {
-  const command = (args[0] ?? "list").toLowerCase();
+  const commandArgs = normalizeCapabilitiesCommandArgs(args);
+  const command = normalizeCapabilitiesCommandInput(commandArgs[0] ?? "list");
 
-  if (args.length === 0 || command === "list") {
+  if (commandArgs.length === 0 || command === "list") {
     const capabilities = listGstackInspiredCapabilities();
     return {
       output: renderCapabilitiesList(capabilities),
@@ -32,7 +34,7 @@ export function buildCapabilitiesCommandPayload(args: string[]): GatewayBasicCom
   }
 
   if (command === "inspect" || command === "show") {
-    const id = requiredCapabilityId(args[1]);
+    const id = requiredCapabilityId(commandArgs[1]);
     if (!id) return missingCapabilityId();
     if (!id.ok) return rejectedCapabilityId();
     const capability = getGstackInspiredCapability(id.value);
@@ -57,10 +59,21 @@ export function buildCapabilitiesCommandPayload(args: string[]): GatewayBasicCom
   }
 
   return {
-    output: "Usage: /capabilities [list|next|inspect <id>]",
+    output: `Unknown capabilities command '${command}'.\n\nUsage: /capabilities [list|next|inspect <id>]`,
     isError: true,
     data: { action: "capabilities_usage" },
   };
+}
+
+function normalizeCapabilitiesCommandArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeCapabilitiesCommandInput(value: string): string {
+  const redacted = scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
 type CapabilityIdValidation = { ok: true; value: string } | { ok: false };
