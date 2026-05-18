@@ -334,6 +334,12 @@ function redactViewInput(value: string): string {
     .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
 }
 
+function redactEventSurfaceText(value: string): string {
+  return scrubSecrets(value)
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
 function normalizeViewInput(value: string): string {
   const redacted = redactViewInput(value);
   return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
@@ -613,7 +619,7 @@ export function renderPerfHooksView(summary: GatewayHookPerfSummary, views: stri
     lines.push(`Average duration: ${summary.averageMs.toFixed(1)}ms`);
   }
   if (summary.slowest) {
-    lines.push(`Slowest hook: ${summary.slowest.kind}${summary.slowest.detail ? ` | ${summary.slowest.detail}` : ""} | ${summary.slowest.durationMs ?? 0}ms`);
+    lines.push(`Slowest hook: ${redactEventSurfaceText(summary.slowest.kind)}${summary.slowest.detail ? ` | ${redactEventSurfaceText(summary.slowest.detail)}` : ""} | ${summary.slowest.durationMs ?? 0}ms`);
   }
   lines.push("");
   lines.push("Inspect: /hooks perf | /hooks recent | /hooks kinds");
@@ -687,7 +693,7 @@ export function renderPerfSummaryView(opts: {
   lines.push("");
   lines.push(`Hooks: ${opts.hookSummary.timedCount} timed of ${opts.hookSummary.recentCount} recent | /hooks perf`);
   if (opts.hookSummary.slowest) {
-    lines.push(`Slowest hook: ${opts.hookSummary.slowest.kind}${opts.hookSummary.slowest.detail ? ` | ${opts.hookSummary.slowest.detail}` : ""} | ${opts.hookSummary.slowest.durationMs ?? 0}ms`);
+    lines.push(`Slowest hook: ${redactEventSurfaceText(opts.hookSummary.slowest.kind)}${opts.hookSummary.slowest.detail ? ` | ${redactEventSurfaceText(opts.hookSummary.slowest.detail)}` : ""} | ${opts.hookSummary.slowest.durationMs ?? 0}ms`);
   }
   lines.push("");
   lines.push(`Runtime events: ${opts.timedEvents.length} timed of ${opts.runtimeEvents.length} recent | /events perf`);

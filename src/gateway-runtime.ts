@@ -104,6 +104,12 @@ function normalizeRuntimeViewInput(value: string): string {
   return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
+function redactRuntimeSurfaceText(value: string): string {
+  return scrubSecrets(value)
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
 function normalizeRuntimeViewArgs(args: string[]): string[] {
   return args.filter((arg) => !arg.trim().startsWith("--"));
 }
@@ -157,7 +163,7 @@ function hookTimeLabel(timestamp?: number): string {
 }
 
 function hookEventLine(event: GatewayHookEventSummary): string {
-  return `${event.kind}${event.detail ? ` | ${event.detail}` : ""}${(event.durationMs ?? 0) > 0 ? ` | ${event.durationMs}ms` : ""}`;
+  return `${redactRuntimeSurfaceText(event.kind)}${event.detail ? ` | ${redactRuntimeSurfaceText(event.detail)}` : ""}${(event.durationMs ?? 0) > 0 ? ` | ${event.durationMs}ms` : ""}`;
 }
 
 export function renderStatusViewOutput(opts: {
@@ -417,7 +423,7 @@ export function renderHooksSummaryView(opts: {
   const lines = ["Registered Hooks:", ""];
   if (opts.registeredHooks && opts.registeredHooks.length > 0) {
     for (const entry of opts.registeredHooks) {
-      lines.push(`${entry.kind}: ${entry.count} hook(s)`);
+      lines.push(`${redactRuntimeSurfaceText(entry.kind)}: ${entry.count} hook(s)`);
     }
   } else {
     lines.push(`Attached per-run hooks: ${opts.attachedHookCount}`);
@@ -476,7 +482,7 @@ export function renderHooksKindsView(supportedKinds: string[]): string {
     lines.push("(No supported hook kinds declared)");
   } else {
     for (const kind of supportedKinds) {
-      lines.push(`- ${kind}`);
+      lines.push(`- ${redactRuntimeSurfaceText(kind)}`);
     }
   }
   lines.push("");
