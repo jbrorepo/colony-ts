@@ -294,9 +294,11 @@ function buildStagedSkillsPayload(
   context: GatewaySkillsStageContext,
 ): GatewayBasicCommandPayload {
   const action = (args[0] ?? "list").toLowerCase();
-  const name = args[1] ?? "";
+  const name = requiredStagedSkillName(args[1]) ?? "";
 
   if (args.length === 0 || action === "list") return renderStagedSkillsList(context);
+
+  if (isStagedSkillNameRequiredAction(action) && !name) return missingStagedSkillName(action);
 
   if (action === "preview") {
     const skill = findStagedSkill(context, name);
@@ -385,6 +387,33 @@ function buildStagedSkillsPayload(
     output: "Usage: /skills staged [list|preview <name>|audit <name>|approve <name>|promote <name> --approved|rollback <name>|history <name>]",
     isError: true,
     data: { action: "skills_staged_usage" },
+  };
+}
+
+function isStagedSkillNameRequiredAction(action: string): boolean {
+  return ["preview", "audit", "approve", "promote", "rollback", "history", "events"].includes(action);
+}
+
+function requiredStagedSkillName(value: string | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized || normalized.startsWith("--")) return null;
+  return normalized;
+}
+
+function missingStagedSkillName(action: string): GatewayBasicCommandPayload {
+  const command = action === "promote"
+    ? "/skills staged promote <name> --approved"
+    : `/skills staged ${action} <name>`;
+  return {
+    output: [
+      "Staged skill name required.",
+      "",
+      `Next valid command: ${command}`,
+      "",
+      "Inspect: /skills staged",
+    ].join("\n"),
+    isError: true,
+    data: { action: "skills_staged_missing_name", stagedAction: action },
   };
 }
 
