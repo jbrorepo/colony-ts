@@ -21,7 +21,7 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
       output: [
         "Trusted Plugins:",
         "",
-        ...(entries.length === 0 ? ["(No trusted local plugins supplied)"] : entries.map((entry) => `- ${entry.id} | ${entry.source} | installed ${yesNo(entry.installed)} | trusted ${yesNo(entry.trusted)}`)),
+        ...(entries.length === 0 ? ["(No trusted local plugins supplied)"] : entries.map((entry) => `- ${scrubPluginSurfaceText(entry.id)} | ${scrubPluginSurfaceText(entry.source)} | installed ${yesNo(entry.installed)} | trusted ${yesNo(entry.trusted)}`)),
         "",
         "Next valid command: /plugins preflight <id>",
       ].join("\n"),
@@ -35,7 +35,7 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
     const entry = entries.find((candidate) => candidate.id === id.value) ?? { id: id.value, source: "installed" as const, installed: false, trusted: false };
     const preflight = buildTrustedPluginPreflight(entry);
     return {
-      output: renderTrustedPluginPreflight(preflight),
+      output: scrubPluginSurfaceText(renderTrustedPluginPreflight(preflight)),
       isError: !preflight.ready,
       data: { action: "plugins_preflight", pluginId: id.value, ready: preflight.ready },
     };
@@ -77,7 +77,7 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
     if (!entry && pluginReceipts.length === 0) {
       return {
         output: [
-          `Plugin not found: ${id.value}`,
+          `Plugin not found: ${scrubPluginSurfaceText(id.value)}`,
           "",
           "Trusted local plugin status can only inspect supplied local descriptors or recorded activation receipts.",
           "Next valid command: /plugins trusted | /plugins preflight <id>",
@@ -105,7 +105,7 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
       "",
       `Trusted entries: ${entries.length}`,
       `Activation receipts: ${receipts.length}`,
-      ...(receipts.length === 0 ? ["(No activation receipts recorded)"] : receipts.map((receipt) => `- ${receipt.pluginId} | active ${yesNo(receipt.active)} | ok ${yesNo(receipt.ok)}`)),
+      ...(receipts.length === 0 ? ["(No activation receipts recorded)"] : receipts.map((receipt) => `- ${scrubPluginSurfaceText(receipt.pluginId)} | active ${yesNo(receipt.active)} | ok ${yesNo(receipt.ok)}`)),
       "",
       "Next valid command: /plugins trusted | /plugins preflight <id>",
     ].join("\n"),
@@ -181,15 +181,15 @@ function renderPluginStatusDetail(
 ): string {
   const latestReceipt = receipts.at(-1) ?? null;
   return [
-    `Plugin Status: ${pluginId}`,
+    `Plugin Status: ${scrubPluginSurfaceText(pluginId)}`,
     "",
-    `Source: ${entry?.source ?? "receipt-only"}`,
+    `Source: ${scrubPluginSurfaceText(entry?.source ?? "receipt-only")}`,
     `Installed: ${entry ? yesNo(entry.installed) : "unknown"}`,
     `Trusted: ${entry ? yesNo(entry.trusted) : "unknown"}`,
     `Active: ${latestReceipt ? yesNo(latestReceipt.active) : "unknown"}`,
-    `Last receipt: ${latestReceipt?.receiptId ?? "none"}`,
+    `Last receipt: ${scrubPluginSurfaceText(latestReceipt?.receiptId ?? "none")}`,
     `Receipt ok: ${latestReceipt ? yesNo(latestReceipt.ok) : "unknown"}`,
-    latestReceipt?.reason ? `Reason: ${latestReceipt.reason}` : "",
+    latestReceipt?.reason ? `Reason: ${scrubPluginSurfaceText(latestReceipt.reason)}` : "",
     "Registry fetch executed: no",
     "Package code executed: no",
     "Credentials persisted: no",
@@ -201,6 +201,10 @@ function renderPluginStatusDetail(
 
 function scrubPluginId(value: string): string {
   return scrubSecrets(value)
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
+}
+
+function scrubPluginSurfaceText(value: string): string {
+  return scrubPluginId(value);
 }
