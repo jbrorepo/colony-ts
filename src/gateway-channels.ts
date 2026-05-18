@@ -142,7 +142,7 @@ function renderChannelsOverview(status: ChannelRegistryStatus): string {
       const enabled = channel.enabled ? "enabled" : "disabled";
       const connected = channel.connected ? "connected" : "disconnected";
       lines.push(
-        `- ${channel.channelId} (${channel.displayName}) | ${enabled} | ${connected} | capabilities ${formatList(channel.capabilities)} | sent ${channel.sentCount ?? 0}`,
+        `- ${redactChannelSurfaceText(channel.channelId)} (${redactChannelSurfaceText(channel.displayName)}) | ${enabled} | ${connected} | capabilities ${formatList(channel.capabilities)} | sent ${channel.sentCount ?? 0}`,
       );
     }
   }
@@ -158,10 +158,10 @@ function renderChannelDeliveries(deliveries: ChannelDeliveryRecord[]): string {
     lines.push("No channel deliveries are visible in this runtime snapshot.");
   } else {
     for (const delivery of deliveries) {
-      const delivered = delivery.deliveredAt ? ` | delivered ${delivery.deliveredAt}` : "";
-      const error = delivery.error ? ` | error ${delivery.error}` : "";
+      const delivered = delivery.deliveredAt ? ` | delivered ${redactChannelSurfaceText(delivery.deliveredAt)}` : "";
+      const error = delivery.error ? ` | error ${redactChannelSurfaceText(delivery.error)}` : "";
       lines.push(
-        `${delivery.deliveryId} | ${delivery.status} | ${delivery.channel} | ${delivery.routeKey} | ${delivery.textLength} chars | created ${delivery.createdAt}${delivered}${error}`,
+        `${redactChannelSurfaceText(delivery.deliveryId)} | ${redactChannelSurfaceText(delivery.status)} | ${redactChannelSurfaceText(delivery.channel)} | ${redactChannelSurfaceText(delivery.routeKey)} | ${delivery.textLength} chars | created ${redactChannelSurfaceText(delivery.createdAt)}${delivered}${error}`,
       );
     }
   }
@@ -186,10 +186,10 @@ function renderChannelAuth(
     for (const channel of channels) {
       lines.push(
         [
-          `- ${channel.channelId}`,
+          `- ${redactChannelSurfaceText(channel.channelId)}`,
           `webhook auth: ${channel.webhookAuthRequired ? "required" : "not configured"}`,
-          `DM policy: ${channel.dmPolicy}`,
-          `group policy: ${channel.groupPolicy}`,
+          `DM policy: ${redactChannelSurfaceText(channel.dmPolicy)}`,
+          `group policy: ${redactChannelSurfaceText(channel.groupPolicy)}`,
           `allowlist entries: ${channel.allowFromCount}`,
         ].join(" | "),
       );
@@ -200,7 +200,7 @@ function renderChannelAuth(
     lines.push("");
     lines.push("Approved pairings:");
     for (const pairing of pairings?.approved ?? []) {
-      lines.push(`- ${pairing.channel} | ${pairing.senderId} | approved by ${pairing.approvedBy} at ${pairing.approvedAt}`);
+      lines.push(`${formatPairingPrefix(pairing.channel, pairing.senderId)} | approved by ${redactChannelSurfaceText(pairing.approvedBy)} at ${redactChannelSurfaceText(pairing.approvedAt)}`);
     }
   }
 
@@ -208,8 +208,8 @@ function renderChannelAuth(
     lines.push("");
     lines.push("Pending pairings:");
     for (const pairing of pairings?.pending ?? []) {
-      const expiry = pairing.expiresAt ? ` | expires ${pairing.expiresAt}` : "";
-      lines.push(`- ${pairing.channel} | ${pairing.senderId} | requested by ${pairing.requestedBy}${expiry}`);
+      const expiry = pairing.expiresAt ? ` | expires ${redactChannelSurfaceText(pairing.expiresAt)}` : "";
+      lines.push(`${formatPairingPrefix(pairing.channel, pairing.senderId)} | requested by ${redactChannelSurfaceText(pairing.requestedBy)}${expiry}`);
     }
   }
 
@@ -230,10 +230,10 @@ function renderChannelSessions(status: ChannelSessionBridgeStatus): string {
   } else {
     lines.push("Routes:");
     for (const route of status.routes) {
-      const lastReply = route.lastReplyDeliveryId ? ` | last reply ${route.lastReplyDeliveryId}` : "";
-      const lastError = route.lastError ? ` | last error ${route.lastError}` : "";
+      const lastReply = route.lastReplyDeliveryId ? ` | last reply ${redactChannelSurfaceText(route.lastReplyDeliveryId)}` : "";
+      const lastError = route.lastError ? ` | last error ${redactChannelSurfaceText(route.lastError)}` : "";
       lines.push(
-        `- ${route.sessionId} | ${route.channel} | ${route.routeKey} | messages ${route.messageCount} | updated ${route.updatedAt}${lastReply}${lastError}`,
+        `- ${redactChannelSurfaceText(route.sessionId)} | ${redactChannelSurfaceText(route.channel)} | ${redactChannelSurfaceText(route.routeKey)} | messages ${route.messageCount} | updated ${redactChannelSurfaceText(route.updatedAt)}${lastReply}${lastError}`,
       );
     }
   }
@@ -242,10 +242,10 @@ function renderChannelSessions(status: ChannelSessionBridgeStatus): string {
     lines.push("");
     lines.push("Recent turns:");
     for (const turn of status.recentTurns) {
-      const delivery = turn.replyDelivery ? ` | delivery ${turn.replyDelivery.deliveryId}:${turn.replyDelivery.status}` : "";
-      const error = turn.error ? ` | error ${turn.error}` : "";
+      const delivery = turn.replyDelivery ? ` | delivery ${redactChannelSurfaceText(turn.replyDelivery.deliveryId)}:${redactChannelSurfaceText(turn.replyDelivery.status)}` : "";
+      const error = turn.error ? ` | error ${redactChannelSurfaceText(turn.error)}` : "";
       lines.push(
-        `- ${turn.turnId} | ${turn.status} | ${turn.sessionId} | inbound ${turn.inboundMessageId}${delivery}${error}`,
+        `- ${redactChannelSurfaceText(turn.turnId)} | ${redactChannelSurfaceText(turn.status)} | ${redactChannelSurfaceText(turn.sessionId)} | inbound ${redactChannelSurfaceText(turn.inboundMessageId)}${delivery}${error}`,
       );
     }
   }
@@ -668,7 +668,11 @@ function emptySessionStatus(): ChannelSessionBridgeStatus {
 }
 
 function formatList(values?: string[]): string {
-  return values && values.length > 0 ? values.join(", ") : "none";
+  return values && values.length > 0 ? values.map(redactChannelSurfaceText).join(", ") : "none";
+}
+
+function formatPairingPrefix(channel: string, senderId: string): string {
+  return `- ${redactChannelSurfaceText(channel)} | ${redactChannelSurfaceText(senderId)}`;
 }
 
 function formatRedactedRecord(record: Record<string, unknown>): string {
@@ -752,7 +756,13 @@ function redactApprovalSignature(value: string): string {
 }
 
 function sanitizeLine(value: string): string {
-  return value.replace(/[\r\n]+/g, " ").trim();
+  return redactChannelSurfaceText(value);
+}
+
+function redactChannelSurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
 
 function normalizeChannelId(value: string): string {
