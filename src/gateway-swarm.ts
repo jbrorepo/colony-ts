@@ -4,6 +4,7 @@ import type {
   SwarmRunSnapshot,
   SwarmStage,
 } from "./orchestrator";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewaySwarmContext {
   runs?: SwarmRunSnapshot[];
@@ -13,8 +14,9 @@ export function buildSwarmCommandPayload(
   args: string[],
   context: GatewaySwarmContext = {},
 ): GatewayBasicCommandPayload {
-  const [view, ...rest] = args;
-  const normalizedView = (view ?? "").toLowerCase();
+  const normalizedArgs = normalizeSwarmArgs(args);
+  const [view, ...rest] = normalizedArgs;
+  const normalizedView = normalizeSwarmToken(view);
 
   if (!view) {
     return {
@@ -31,7 +33,7 @@ export function buildSwarmCommandPayload(
   }
 
   if (normalizedView === "status" || normalizedView === "runs") {
-    const runId = rest.join(" ").trim();
+    const runId = redactSwarmInput(rest.join(" ").trim());
     if (runId) {
       const run = (context.runs ?? []).find((candidate) => candidate.runId === runId);
       return {
@@ -47,12 +49,15 @@ export function buildSwarmCommandPayload(
   }
 
   if (normalizedView === "resume") {
-    const runId = rest.join(" ").trim();
+    const runId = redactSwarmInput(rest.join(" ").trim());
     if (!runId) {
       return {
         output: "Usage: /swarm resume <swarm_run_id>",
         isError: true,
       };
+    }
+    if (runId.includes("[REDACTED]")) {
+      return rejectedSwarmRunId();
     }
     return {
       output: `Resuming swarm run ${runId}.`,
@@ -62,13 +67,16 @@ export function buildSwarmCommandPayload(
   }
 
   if (normalizedView === "retry") {
-    const runId = rest[0] ?? "";
-    const stage = normalizeStage(rest[1] ?? "");
+    const runId = redactSwarmInput(rest[0] ?? "");
+    const stage = normalizeStage(normalizeSwarmToken(rest[1]));
     if (!runId || !stage) {
       return {
         output: "Usage: /swarm retry <swarm_run_id> <plan|execute|review>",
         isError: true,
       };
+    }
+    if (runId.includes("[REDACTED]")) {
+      return rejectedSwarmRunId();
     }
     return {
       output: `Retrying swarm run ${runId} stage ${stage}.`,
@@ -78,12 +86,15 @@ export function buildSwarmCommandPayload(
   }
 
   if (normalizedView === "cancel") {
-    const runId = rest.join(" ").trim();
+    const runId = redactSwarmInput(rest.join(" ").trim());
     if (!runId) {
       return {
         output: "Usage: /swarm cancel <swarm_run_id>",
         isError: true,
       };
+    }
+    if (runId.includes("[REDACTED]")) {
+      return rejectedSwarmRunId();
     }
     return {
       output: `Cancelling swarm run ${runId}.`,
@@ -93,7 +104,7 @@ export function buildSwarmCommandPayload(
   }
 
   const executionMode: SwarmExecutionMode = normalizedView === "llm" ? "llm" : "coordinator_only";
-  const objective = (executionMode === "llm" ? rest : args).join(" ").trim();
+  const objective = redactSwarmInput((executionMode === "llm" ? rest : normalizedArgs).join(" ").trim());
   if (!objective) {
     return {
       output: executionMode === "llm" ? "Usage: /swarm llm <objective>" : "Usage: /swarm <objective>",
@@ -110,6 +121,35 @@ export function buildSwarmCommandPayload(
     ].join("\n"),
     data: { objective, mode: "orchestrated-swarm", executionMode },
     action: { kind: "start_swarm", objective, executionMode },
+  };
+}
+
+function normalizeSwarmArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeSwarmToken(value: string | undefined): string {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return "";
+  const redacted = redactSwarmInput(raw);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function redactSwarmInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function rejectedSwarmRunId(): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Swarm run id rejected.",
+      "",
+      "Run ids must be identifiers, not flags or credentials.",
+      "Next valid command: /swarm status | /swarm resume <swarm_run_id>",
+    ].join("\n"),
+    isError: true,
   };
 }
 
