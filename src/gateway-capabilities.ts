@@ -32,22 +32,17 @@ export function buildCapabilitiesCommandPayload(args: string[]): GatewayBasicCom
   }
 
   if (command === "inspect" || command === "show") {
-    const id = args[1] ?? "";
-    if (!id) {
-      return {
-        output: "Usage: /capabilities inspect <id>",
-        isError: true,
-        data: { action: "capabilities_usage" },
-      };
-    }
-    const capability = getGstackInspiredCapability(id);
+    const id = requiredCapabilityId(args[1]);
+    if (!id) return missingCapabilityId();
+    if (!id.ok) return rejectedCapabilityId();
+    const capability = getGstackInspiredCapability(id.value);
     if (!capability) {
       return {
-        output: `Capability not found: ${id}\n\nInspect: /capabilities | /capabilities next`,
+        output: `Capability not found: ${id.value}\n\nInspect: /capabilities | /capabilities next`,
         isError: true,
         data: {
           action: "capabilities_missing",
-          id,
+          id: id.value,
         },
       };
     }
@@ -65,6 +60,41 @@ export function buildCapabilitiesCommandPayload(args: string[]): GatewayBasicCom
     output: "Usage: /capabilities [list|next|inspect <id>]",
     isError: true,
     data: { action: "capabilities_usage" },
+  };
+}
+
+type CapabilityIdValidation = { ok: true; value: string } | { ok: false };
+
+function requiredCapabilityId(value: string | undefined): CapabilityIdValidation | null {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return null;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(raw)) return { ok: false };
+  if (raw.includes("..") || raw.includes("@{")) return { ok: false };
+  return { ok: true, value: raw };
+}
+
+function missingCapabilityId(): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Capability id required.",
+      "",
+      "Next valid command: /capabilities inspect <id>",
+    ].join("\n"),
+    isError: true,
+    data: { action: "capabilities_missing_id" },
+  };
+}
+
+function rejectedCapabilityId(): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Capability id rejected.",
+      "",
+      "Capability identifiers must be local capability ids, not paths, shell text, flags, or credentials.",
+      "Next valid command: /capabilities inspect <id>",
+    ].join("\n"),
+    isError: true,
+    data: { action: "capabilities_rejected_id" },
   };
 }
 
