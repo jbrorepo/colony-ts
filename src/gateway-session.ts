@@ -12,6 +12,7 @@ import {
   historyTimestampBoundary,
   readString,
 } from "./gateway-shared";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export type SessionShortcutAlias = "pending" | "latest";
 export type HistoryFilterMode = "user" | "assistant" | "system" | "tool" | "error";
@@ -92,6 +93,21 @@ function parsePositiveInteger(value: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function redactSessionQuery(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeSessionQuery(value: string): string {
+  const redacted = redactSessionQuery(value);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeSessionQueryArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 export function interruptionLabel(state?: string): string {
   if (state === "interrupted_prompt") return "awaiting reply";
   if (state === "interrupted_turn") return "tool turn interrupted";
@@ -122,13 +138,14 @@ export function sessionFilterLabel(filter: SessionFilter): string {
 }
 
 export function parseSessionQuery(args: string[]): SessionQuerySpec {
-  const maybeLimit = parsePositiveInteger(args.at(-1) ?? "");
-  const tokens = maybeLimit !== null ? args.slice(0, -1) : args;
+  const queryArgs = normalizeSessionQueryArgs(args);
+  const maybeLimit = parsePositiveInteger(queryArgs.at(-1) ?? "");
+  const tokens = maybeLimit !== null ? queryArgs.slice(0, -1) : queryArgs;
   const filters = new Set<SessionFilter>();
   const searchTerms: string[] = [];
 
   for (const token of tokens) {
-    const normalized = token.trim().toLowerCase();
+    const normalized = normalizeSessionQuery(token);
     const filter = SESSION_FILTER_ALIASES[normalized];
     if (filter) {
       filters.add(filter);
@@ -139,7 +156,7 @@ export function parseSessionQuery(args: string[]): SessionQuerySpec {
 
   return {
     filters: [...filters],
-    search: searchTerms.join(" ").trim(),
+    search: normalizeSessionQuery(searchTerms.join(" ")),
     limit: maybeLimit,
   };
 }
