@@ -573,19 +573,19 @@ export function renderPerfProvidersView(opts: {
         || right.totalApiDurationS - left.totalApiDurationS
       ))[0];
     if (slowest) {
-      lines.push(`Slowest provider: ${slowest.provider} | ${(slowest.totalApiDurationS / slowest.totalCalls).toFixed(2)}s/call`);
+      lines.push(`Slowest provider: ${redactEventSurfaceText(slowest.provider)} | ${(slowest.totalApiDurationS / slowest.totalCalls).toFixed(2)}s/call`);
     }
     lines.push("");
     for (const summary of activeSummaries) {
       const average = summary.totalCalls > 0 ? summary.totalApiDurationS / summary.totalCalls : 0;
-      lines.push(`${summary.provider}: ${summary.totalApiDurationS.toFixed(1)}s | ${summary.totalCalls} calls | ${average.toFixed(2)}s/call`);
+      lines.push(`${redactEventSurfaceText(summary.provider)}: ${summary.totalApiDurationS.toFixed(1)}s | ${summary.totalCalls} calls | ${average.toFixed(2)}s/call`);
     }
     if (opts.ambiguousCount > 0) {
       lines.push("");
       lines.push(`Ambiguous timed models: ${opts.ambiguousCount}`);
     }
     if (opts.unmappedModels.length > 0) {
-      lines.push(`Unmapped timed models: ${opts.unmappedModels.map((model) => `\`${model}\``).join(", ")}`);
+      lines.push(`Unmapped timed models: ${opts.unmappedModels.map((model) => `\`${redactEventSurfaceText(model)}\``).join(", ")}`);
     }
   }
   lines.push("");
@@ -669,7 +669,7 @@ export function renderPerfSummaryView(opts: {
         || right.apiDurationS - left.apiDurationS
       ))[0];
     if (slowestModel) {
-      lines.push(`Slowest model: \`${slowestModel.model}\` | ${(slowestModel.apiDurationS / slowestModel.callCount).toFixed(2)}s/call`);
+      lines.push(`Slowest model: \`${redactEventSurfaceText(slowestModel.model)}\` | ${(slowestModel.apiDurationS / slowestModel.callCount).toFixed(2)}s/call`);
     }
   }
   lines.push("");
@@ -682,7 +682,7 @@ export function renderPerfSummaryView(opts: {
         || right.totalApiDurationS - left.totalApiDurationS
       ))[0];
     if (slowestProvider) {
-      lines.push(`Slowest provider: ${slowestProvider.provider} | ${(slowestProvider.totalApiDurationS / slowestProvider.totalCalls).toFixed(2)}s/call`);
+      lines.push(`Slowest provider: ${redactEventSurfaceText(slowestProvider.provider)} | ${(slowestProvider.totalApiDurationS / slowestProvider.totalCalls).toFixed(2)}s/call`);
     }
   }
   lines.push("");
