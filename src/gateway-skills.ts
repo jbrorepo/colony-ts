@@ -111,6 +111,21 @@ export function buildSkillsCommandPayload(
   }
 
   if (command === "docs-preview" || command === "docs") {
+    const blockedArg = args.slice(1).find(isSkillDocsMutationArgument);
+    if (blockedArg) {
+      return {
+        output: [
+          "Skills docs-preview is preview-only.",
+          "",
+          "Skill docs generation cannot write, promote, save, or install from this command.",
+          `Rejected argument: ${blockedArg}`,
+          "No files were written.",
+          "Next valid command: /skills docs-preview",
+        ].join("\n"),
+        isError: true,
+        data: { action: "skills_docs_preview_blocked", rejectedArgument: blockedArg },
+      };
+    }
     const preview = generateSkillDocsPreview({
       skills,
       toolDefinitions: context.toolDefinitions ?? [],
@@ -135,6 +150,22 @@ export function buildSkillsCommandPayload(
     isError: true,
     data: { action: "skills_usage" },
   };
+}
+
+function isSkillDocsMutationArgument(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return [
+    "--write",
+    "--save",
+    "--output",
+    "--install",
+    "--promote",
+    "--approved",
+    "write",
+    "save",
+    "install",
+    "promote",
+  ].includes(normalized);
 }
 
 function resolveSkills(context: GatewaySkillsContext): SkillDefinition[] {
