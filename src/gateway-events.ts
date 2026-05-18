@@ -547,7 +547,7 @@ export function buildPerfCommandPayload(opts: {
 }
 
 export function formatRuntimeEventLine(event: RuntimeEventLine): string {
-  return `${new Date(event.timestamp).toISOString()} | ${event.kind} | ${event.subject}${event.durationMs ? ` | ${event.durationMs}ms` : ""} | ${event.status}${event.detail ? ` | ${event.detail}` : ""}`;
+  return `${new Date(event.timestamp).toISOString()} | ${redactEventSurfaceText(event.kind)} | ${redactEventSurfaceText(event.subject)}${event.durationMs ? ` | ${event.durationMs}ms` : ""} | ${redactEventSurfaceText(event.status)}${event.detail ? ` | ${redactEventSurfaceText(event.detail)}` : ""}`;
 }
 
 export function renderPerfProvidersView(opts: {
@@ -603,7 +603,7 @@ export function renderPerfToolsView(summary: GatewayToolPerfSummary, views: stri
     lines.push(`Average duration: ${summary.averageMs.toFixed(1)}ms`);
   }
   if (summary.slowest) {
-    lines.push(`Slowest tool: ${summary.slowest.toolName} | ${summary.slowest.durationMs ?? 0}ms`);
+    lines.push(`Slowest tool: ${redactEventSurfaceText(summary.slowest.toolName)} | ${summary.slowest.durationMs ?? 0}ms`);
   }
   lines.push("");
   lines.push("Inspect: /tools perf | /tools recent | /tools artifacts");
@@ -688,7 +688,7 @@ export function renderPerfSummaryView(opts: {
   lines.push("");
   lines.push(`Tools: ${opts.toolSummary.timedCount} timed of ${opts.toolSummary.recentCount} recent | /tools perf`);
   if (opts.toolSummary.slowest) {
-    lines.push(`Slowest tool: ${opts.toolSummary.slowest.toolName} | ${opts.toolSummary.slowest.durationMs ?? 0}ms`);
+    lines.push(`Slowest tool: ${redactEventSurfaceText(opts.toolSummary.slowest.toolName)} | ${opts.toolSummary.slowest.durationMs ?? 0}ms`);
   }
   lines.push("");
   lines.push(`Hooks: ${opts.hookSummary.timedCount} timed of ${opts.hookSummary.recentCount} recent | /hooks perf`);
@@ -699,7 +699,7 @@ export function renderPerfSummaryView(opts: {
   lines.push(`Runtime events: ${opts.timedEvents.length} timed of ${opts.runtimeEvents.length} recent | /events perf`);
   if (opts.timedEvents[0]) {
     const slowestEvent = opts.timedEvents.slice().sort((left, right) => (right.durationMs ?? 0) - (left.durationMs ?? 0))[0];
-    lines.push(`Slowest event: ${slowestEvent.kind} | ${slowestEvent.subject} | ${slowestEvent.durationMs ?? 0}ms`);
+    lines.push(`Slowest event: ${redactEventSurfaceText(slowestEvent.kind)} | ${redactEventSurfaceText(slowestEvent.subject)} | ${slowestEvent.durationMs ?? 0}ms`);
   }
   lines.push("");
   lines.push(`Compactions: ${opts.compactionSummary.recentCount} recent | ${opts.compactionSummary.failureCount} failure | ${opts.compactionSummary.timedCount} timed | /compact recent`);
@@ -738,7 +738,7 @@ export function renderEventsSummaryView(opts: {
     ), opts.timedEvents[0]);
     lines.push(`Average duration: ${(totalDuration / opts.timedEvents.length).toFixed(1)}ms`);
     if (slowest) {
-      lines.push(`Slowest timed event: ${slowest.kind} | ${slowest.subject} | ${slowest.durationMs ?? 0}ms`);
+      lines.push(`Slowest timed event: ${redactEventSurfaceText(slowest.kind)} | ${redactEventSurfaceText(slowest.subject)} | ${slowest.durationMs ?? 0}ms`);
     }
   }
   if (opts.events[0]) {
@@ -777,7 +777,7 @@ export function renderEventsPerfView(opts: {
     ), opts.timedEvents[0]);
     lines.push(`Average duration: ${(totalDuration / opts.timedEvents.length).toFixed(1)}ms`);
     if (slowest) {
-      lines.push(`Slowest timed event: ${slowest.kind} | ${slowest.subject} | ${slowest.durationMs ?? 0}ms`);
+      lines.push(`Slowest timed event: ${redactEventSurfaceText(slowest.kind)} | ${redactEventSurfaceText(slowest.subject)} | ${slowest.durationMs ?? 0}ms`);
     }
     lines.push("");
     lines.push("Top timed activity:");
