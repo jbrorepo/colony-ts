@@ -16,6 +16,7 @@ import {
   generateSkillDocsPreview,
   type GeneratedSkillDocsToolDefinition,
 } from "./skills/generated-docs";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewaySkillsContext {
   catalog?: SkillCatalog | null;
@@ -63,16 +64,15 @@ export function buildSkillsCommandPayload(
   }
 
   if (command === "inspect") {
-    const name = args[1] ?? "";
-    if (!name) {
-      return { output: "Usage: /skills inspect <name>", isError: true, data: { action: "skills_usage" } };
-    }
-    const skill = skills.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+    const name = validateSkillLookupName(args[1]);
+    if (!name) return missingSkillName("/skills inspect <name>");
+    if (!name.ok) return rejectedSkillName("/skills inspect <name>");
+    const skill = skills.find((candidate) => candidate.name.toLowerCase() === name.value.toLowerCase());
     if (!skill) {
       return {
-        output: `Skill not found: ${name}\n\nInspect: /skills | /skills search <query>`,
+        output: `Skill not found: ${name.value}\n\nInspect: /skills | /skills search <query>`,
         isError: true,
-        data: { action: "skills_missing", name },
+        data: { action: "skills_missing", name: name.value },
       };
     }
     return {
@@ -294,27 +294,31 @@ function buildStagedSkillsPayload(
   context: GatewaySkillsStageContext,
 ): GatewayBasicCommandPayload {
   const action = (args[0] ?? "list").toLowerCase();
-  const name = requiredStagedSkillName(args[1]) ?? "";
+  const name = validateSkillLookupName(args[1]);
+  const skillName = name?.ok ? name.value : "";
 
   if (args.length === 0 || action === "list") return renderStagedSkillsList(context);
 
-  if (isStagedSkillNameRequiredAction(action) && !name) return missingStagedSkillName(action);
+  if (isStagedSkillNameRequiredAction(action)) {
+    if (!name) return missingStagedSkillName(action);
+    if (!name.ok) return rejectedStagedSkillName(action);
+  }
 
   if (action === "preview") {
-    const skill = findStagedSkill(context, name);
-    if (!skill) return missingStagedSkill(name);
+    const skill = findStagedSkill(context, skillName);
+    if (!skill) return missingStagedSkill(skillName);
     return renderStagedSkillPreview(skill, context);
   }
 
   if (action === "audit") {
-    const skill = findStagedSkill(context, name);
-    if (!skill) return missingStagedSkill(name);
+    const skill = findStagedSkill(context, skillName);
+    if (!skill) return missingStagedSkill(skillName);
     return renderStagedSkillAudit(skill, context);
   }
 
   if (action === "approve") {
-    const skill = findStagedSkill(context, name);
-    if (!skill) return missingStagedSkill(name);
+    const skill = findStagedSkill(context, skillName);
+    if (!skill) return missingStagedSkill(skillName);
     return {
       output: [
         `Staged Skill Approval: ${skill.name}`,
@@ -329,8 +333,8 @@ function buildStagedSkillsPayload(
   }
 
   if (action === "promote") {
-    const skill = findStagedSkill(context, name);
-    if (!skill) return missingStagedSkill(name);
+    const skill = findStagedSkill(context, skillName);
+    if (!skill) return missingStagedSkill(skillName);
     if (!args.includes("--approved")) {
       return {
         output: `Second approval required before promotion.\n\nUse /skills staged approve ${skill.name} first.`,
@@ -355,8 +359,8 @@ function buildStagedSkillsPayload(
   }
 
   if (action === "rollback") {
-    const skill = findStagedSkill(context, name);
-    if (!skill) return missingStagedSkill(name);
+    const skill = findStagedSkill(context, skillName);
+    if (!skill) return missingStagedSkill(skillName);
     if (args.includes("--approved")) {
       const rollback = context.rollbackResults?.[skill.name] ?? context.rollbackResults?.[skill.name.toLowerCase()];
       if (!rollback) {
@@ -378,8 +382,8 @@ function buildStagedSkillsPayload(
   }
 
   if (action === "history" || action === "events") {
-    const skill = findStagedSkill(context, name);
-    if (!skill) return missingStagedSkill(name);
+    const skill = findStagedSkill(context, skillName);
+    if (!skill) return missingStagedSkill(skillName);
     return renderStagedSkillHistory(skill, context);
   }
 
@@ -394,10 +398,47 @@ function isStagedSkillNameRequiredAction(action: string): boolean {
   return ["preview", "audit", "approve", "promote", "rollback", "history", "events"].includes(action);
 }
 
-function requiredStagedSkillName(value: string | undefined): string | null {
+type SkillLookupNameValidation = { ok: true; value: string } | { ok: false };
+
+function validateSkillLookupName(value: string | undefined): SkillLookupNameValidation | null {
   const normalized = value?.trim() ?? "";
   if (!normalized || normalized.startsWith("--")) return null;
-  return normalized;
+  const redacted = redactSkillLookupText(normalized);
+  if (redacted.includes("[REDACTED]")) return { ok: false };
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$/.test(redacted)) return { ok: false };
+  if (redacted.includes("..") || redacted.includes("//") || redacted.includes("@{")) return { ok: false };
+  return { ok: true, value: redacted };
+}
+
+function redactSkillLookupText(value: string): string {
+  return scrubSecrets(value)
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function missingSkillName(command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Skill name required.",
+      "",
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "skills_missing_name" },
+  };
+}
+
+function rejectedSkillName(command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Skill name rejected.",
+      "",
+      "Skill names must be local catalog identifiers, not paths, flags, or credentials.",
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "skills_rejected_name" },
+  };
 }
 
 function missingStagedSkillName(action: string): GatewayBasicCommandPayload {
@@ -414,6 +455,24 @@ function missingStagedSkillName(action: string): GatewayBasicCommandPayload {
     ].join("\n"),
     isError: true,
     data: { action: "skills_staged_missing_name", stagedAction: action },
+  };
+}
+
+function rejectedStagedSkillName(action: string): GatewayBasicCommandPayload {
+  const command = action === "promote"
+    ? "/skills staged promote <name> --approved"
+    : `/skills staged ${action} <name>`;
+  return {
+    output: [
+      "Staged skill name rejected.",
+      "",
+      "Staged skill names must be local catalog identifiers, not paths, flags, or credentials.",
+      `Next valid command: ${command}`,
+      "",
+      "Inspect: /skills staged",
+    ].join("\n"),
+    isError: true,
+    data: { action: "skills_staged_rejected_name", stagedAction: action },
   };
 }
 
