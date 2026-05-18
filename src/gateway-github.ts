@@ -1,24 +1,17 @@
 import type { GatewayBasicCommandPayload } from "./gateway-basic";
+import { createGitHubIssueIntakePlan } from "./github-pr-handoff";
 import { renderGitHubPrReceiptStatus, type GitHubPrExecutionReceipt } from "./github-pr-execution";
 
 export interface GatewayGitHubContext {
   receipts?: GitHubPrExecutionReceipt[];
+  workspaceRoot?: string;
 }
 
 export function buildGitHubCommandPayload(args: string[], context: GatewayGitHubContext = {}): GatewayBasicCommandPayload {
   const scope = (args[0] ?? "status").toLowerCase();
   const action = (args[1] ?? "").toLowerCase();
   if (scope === "issue" && action === "plan") {
-    return {
-      output: [
-        "GitHub Issue Plan:",
-        "",
-        `Reference: ${args[2] ?? "missing"}`,
-        "Network fetch: no",
-        "Next valid command: /github workspace approve <signature>",
-      ].join("\n"),
-      data: { action: "github_issue_plan" },
-    };
+    return buildGitHubIssuePlanPayload(args.slice(2), context);
   }
   if (scope === "workspace" && action === "approve") {
     return {
@@ -78,5 +71,52 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
       "Next valid command: /github issue plan <owner>/<repo>#<n>",
     ].join("\n"),
     data: { action: "github_status" },
+  };
+}
+
+function buildGitHubIssuePlanPayload(args: string[], context: GatewayGitHubContext): GatewayBasicCommandPayload {
+  const reference = args.join(" ").trim();
+  const plan = createGitHubIssueIntakePlan({
+    issue: { reference },
+    workspaceRoot: context.workspaceRoot ?? ".",
+  });
+  if (!plan.ok || !plan.issue) {
+    return {
+      output: [
+        "GitHub Issue Plan rejected.",
+        "",
+        plan.reason ?? "GitHub issue intake rejected the supplied reference.",
+        "",
+        ...plan.guardrails.map((guardrail) => `- ${guardrail}`),
+        "",
+        "Next valid command: /github issue plan <owner>/<repo>#<n>",
+      ].join("\n"),
+      isError: true,
+      data: { action: "github_issue_plan", ok: false },
+    };
+  }
+  return {
+    output: [
+      "GitHub Issue Plan:",
+      "",
+      `Issue: ${plan.issue.owner}/${plan.issue.repo}#${plan.issue.number}`,
+      `Branch: ${plan.branchName ?? "unknown"}`,
+      `Worktree: ${plan.worktreePath ?? "unknown"}`,
+      `Approval signature: ${plan.localWorkspaceApprovalSignature ?? "missing"}`,
+      "Network fetch: no",
+      "Approval state: awaiting local workspace approval",
+      "",
+      "Guardrails:",
+      ...plan.guardrails.map((guardrail) => `- ${guardrail}`),
+      "",
+      "Next valid command: /github workspace approve <signature>",
+    ].join("\n"),
+    data: {
+      action: "github_issue_plan",
+      ok: true,
+      issue: `${plan.issue.owner}/${plan.issue.repo}#${plan.issue.number}`,
+      branchName: plan.branchName,
+      approvalSignature: plan.localWorkspaceApprovalSignature,
+    },
   };
 }

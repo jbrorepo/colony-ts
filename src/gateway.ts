@@ -774,7 +774,10 @@ export class SlashCommandParser {
   };
 
   private cmdGitHub = (args: string[], ctx: SlashCommandContext): CommandResult => {
-    const payload = buildGitHubCommandPayload(args, ctx.github as Parameters<typeof buildGitHubCommandPayload>[1]);
+    const payload = buildGitHubCommandPayload(args, {
+      ...(ctx.github as Parameters<typeof buildGitHubCommandPayload>[1]),
+      workspaceRoot: ctx.workspace?.root,
+    });
     return result({
       command: "github",
       output: payload.output,
