@@ -7,6 +7,7 @@ import {
 import {
   BrowserSidecarRuntime,
   type BrowserSidecarSnapshot,
+  validateBrowserAutomationUrl,
 } from "./browser/browser-sidecar-runtime";
 
 export interface GatewayBrowserContext {
@@ -87,7 +88,11 @@ export function buildBrowserCommandPayload(
   }
 
   if (command === "open") {
-    const url = args.find((arg, index) => index > 0 && !arg.startsWith("--")) ?? "";
+    const rawUrl = args.find((arg, index) => index > 0 && !arg.startsWith("--")) ?? "";
+    if (!rawUrl) return missingBrowserArgument("Browser URL", "/browser open <url> --approved");
+    const policy = validateBrowserAutomationUrl(rawUrl);
+    if (!policy.ok) return rejectedBrowserArgument(policy.reason, "/browser open <url> --approved");
+    const url = displayBrowserUrl(policy.url);
     const approved = args.includes("--approved");
     return {
       output: [
@@ -144,6 +149,10 @@ export function buildBrowserCommandPayload(
 
   if (command === "click" || command === "type") {
     const approved = args.includes("--approved");
+    const selector = args[1]?.trim() ?? "";
+    if (!selector || selector.startsWith("--")) return missingBrowserArgument("Browser selector", `/browser ${command} <selector> --approved`);
+    const text = command === "type" ? args.slice(2).filter((arg) => arg !== "--approved").join(" ").trim() : "";
+    if (command === "type" && !text) return missingBrowserArgument("Browser type text", "/browser type <selector> <text> --approved");
     return {
       output: [
         approved ? `Browser ${command} approved.` : `Browser ${command} blocked.`,
@@ -159,8 +168,8 @@ export function buildBrowserCommandPayload(
       data: { action: approved ? `browser_${command}` : `browser_${command}_blocked` },
       action: approved
         ? command === "click"
-          ? { kind: "browser_click", selector: args[1] ?? "", approved: true }
-          : { kind: "browser_type", selector: args[1] ?? "", text: args.slice(2).filter((arg) => arg !== "--approved").join(" "), approved: true }
+          ? { kind: "browser_click", selector, approved: true }
+          : { kind: "browser_type", selector, text, approved: true }
         : { kind: "display" },
     };
   }
@@ -277,4 +286,41 @@ function renderBrowserContract(descriptor: BrowserSidecarDescriptor): string {
 
 function yesNo(value: boolean): string {
   return value ? "yes" : "no";
+}
+
+function missingBrowserArgument(label: string, command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      `${label} required.`,
+      "",
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "browser_missing_argument", label },
+  };
+}
+
+function rejectedBrowserArgument(reason: string, command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Browser command rejected.",
+      "",
+      reason,
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "browser_rejected_argument" },
+  };
+}
+
+function displayBrowserUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/" && !parsed.search && !parsed.hash) {
+      return `${parsed.protocol}//${parsed.host}`;
+    }
+  } catch {
+    return url;
+  }
+  return url;
 }
