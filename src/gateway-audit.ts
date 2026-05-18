@@ -6,6 +6,10 @@ export interface GatewayAuditContext {
   trail?: SecurityAuditTrail | null;
 }
 
+function auditInspectViews(): string {
+  return "/audit status | /audit export jsonl | /audit export summary | /audit verify | /audit otel";
+}
+
 export function buildAuditCommandPayload(args: string[], context: GatewayAuditContext = {}): GatewayBasicCommandPayload {
   const command = (args[0] ?? "status").toLowerCase();
   const trail = context.trail ?? null;
@@ -16,25 +20,32 @@ export function buildAuditCommandPayload(args: string[], context: GatewayAuditCo
       data: { action: "audit_unavailable" },
     };
   }
-  if (command === "export" && args[1] === "jsonl") {
-    return {
-      output: ["Audit Export JSONL:", "", exportAuditJsonl(trail), "", "Network sent: no"].join("\n"),
-      data: { action: "audit_export_jsonl" },
-    };
-  }
-  if (command === "export" && args[1] === "summary") {
-    const summary = exportAuditSummary(trail);
-    return {
-      output: [
-        "Audit Export Summary:",
-        "",
-        `Total events: ${summary.totalEvents}`,
-        `Integrity verified: ${summary.integrityVerified ? "yes" : "no"}`,
-        `Denied actions: ${summary.deniedActions}`,
-        "Network sent: no",
-      ].join("\n"),
-      data: { action: "audit_export_summary" },
-    };
+  if (command === "export") {
+    const format = args[1]?.trim().toLowerCase() ?? "";
+    if (!format || format.startsWith("--")) {
+      return missingAuditExportFormat();
+    }
+    if (format === "jsonl") {
+      return {
+        output: ["Audit Export JSONL:", "", exportAuditJsonl(trail), "", "Network sent: no"].join("\n"),
+        data: { action: "audit_export_jsonl" },
+      };
+    }
+    if (format === "summary") {
+      const summary = exportAuditSummary(trail);
+      return {
+        output: [
+          "Audit Export Summary:",
+          "",
+          `Total events: ${summary.totalEvents}`,
+          `Integrity verified: ${summary.integrityVerified ? "yes" : "no"}`,
+          `Denied actions: ${summary.deniedActions}`,
+          "Network sent: no",
+        ].join("\n"),
+        data: { action: "audit_export_summary" },
+      };
+    }
+    return unknownAuditExportFormat(format);
   }
   if (command === "verify") {
     const integrity = trail.verifyIntegrity();
@@ -62,6 +73,9 @@ export function buildAuditCommandPayload(args: string[], context: GatewayAuditCo
       data: { action: "audit_otel", count: events.length },
     };
   }
+  if (command !== "status") {
+    return unknownAuditCommand(command);
+  }
   const stats = trail.getStats();
   return {
     output: [
@@ -69,9 +83,49 @@ export function buildAuditCommandPayload(args: string[], context: GatewayAuditCo
       "",
       `Events: ${stats.totalEvents}`,
       `Types: ${Object.keys(stats.eventsByType).length}`,
-      "Exports: /audit export jsonl | /audit export summary | /audit verify | /audit otel",
+      `Exports: ${auditInspectViews()}`,
       "Next valid command: /audit verify",
     ].join("\n"),
     data: { action: "audit_status", totalEvents: stats.totalEvents },
+  };
+}
+
+function missingAuditExportFormat(): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Audit export format required.",
+      "",
+      `Views: ${auditInspectViews()}`,
+      "Next valid command: /audit export jsonl | /audit export summary",
+    ].join("\n"),
+    isError: true,
+    data: { action: "audit_export_missing_format" },
+  };
+}
+
+function unknownAuditExportFormat(format: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      `Unknown audit export format '${format}'.`,
+      "",
+      "Supported export formats: jsonl, summary",
+      `Views: ${auditInspectViews()}`,
+      "Next valid command: /audit export jsonl | /audit export summary",
+    ].join("\n"),
+    isError: true,
+    data: { action: "audit_export_unknown_format", format },
+  };
+}
+
+function unknownAuditCommand(command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      `Unknown audit command '${command}'.`,
+      "",
+      `Views: ${auditInspectViews()}`,
+      "Next valid command: /audit status",
+    ].join("\n"),
+    isError: true,
+    data: { action: "audit_unknown_command", command },
   };
 }
