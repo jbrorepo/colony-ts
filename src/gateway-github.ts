@@ -1,6 +1,7 @@
 import type { GatewayBasicCommandPayload } from "./gateway-basic";
 import { createGitHubIssueIntakePlan } from "./github-pr-handoff";
 import { renderGitHubPrReceiptStatus, type GitHubPrExecutionReceipt } from "./github-pr-execution";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayGitHubContext {
   receipts?: GitHubPrExecutionReceipt[];
@@ -14,16 +15,7 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
     return buildGitHubIssuePlanPayload(args.slice(2), context);
   }
   if (scope === "workspace" && action === "approve") {
-    return {
-      output: [
-        "GitHub Workspace Approval:",
-        "",
-        `Signature: ${args[2] ?? "missing"}`,
-        "Local branch/worktree mutation requires exact approval and injected executor.",
-        "Next valid command: /github pr plan <run_id>",
-      ].join("\n"),
-      data: { action: "github_workspace_approve" },
-    };
+    return buildGitHubWorkspaceApprovalPayload(args[2]);
   }
   if (scope === "pr" && action === "plan") {
     const runId = requiredIdentifier(args[2]);
@@ -95,6 +87,80 @@ function missingGitHubIdentifier(label: string, command: string): GatewayBasicCo
     isError: true,
     data: { action: "github_missing_identifier", label },
   };
+}
+
+interface ParsedGitHubWorkspaceApprovalSignature {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  branchName: string;
+}
+
+function buildGitHubWorkspaceApprovalPayload(rawSignature: string | undefined): GatewayBasicCommandPayload {
+  const signature = requiredIdentifier(rawSignature);
+  if (!signature) return missingGitHubIdentifier("Workspace approval signature", "/github workspace approve <signature>");
+  const parsed = parseGitHubWorkspaceApprovalSignature(signature);
+  if (!parsed) {
+    return {
+      output: [
+        "Malformed GitHub workspace approval signature.",
+        "",
+        "Expected: github-local-workspace:<owner>/<repo>#<issue>:<branch>",
+        "Approval signatures must describe a local workspace handoff, not credentials.",
+        "Next valid command: /github issue plan <owner>/<repo>#<n>",
+      ].join("\n"),
+      isError: true,
+      data: { action: "github_workspace_approve", ok: false },
+    };
+  }
+  return {
+    output: [
+      "GitHub Workspace Approval:",
+      "",
+      `Issue: ${parsed.owner}/${parsed.repo}#${parsed.issueNumber}`,
+      `Branch: ${parsed.branchName}`,
+      "Approval state: accepted for host-owned local workspace handoff",
+      "Local branch/worktree mutation requires exact approval and injected executor.",
+      "No git push or remote PR creation is executed by this approval.",
+      "Credentials persisted: no",
+      "Next valid command: /github pr plan <run_id>",
+    ].join("\n"),
+    data: {
+      action: "github_workspace_approve",
+      ok: true,
+      issue: `${parsed.owner}/${parsed.repo}#${parsed.issueNumber}`,
+      branchName: parsed.branchName,
+    },
+  };
+}
+
+function parseGitHubWorkspaceApprovalSignature(value: string): ParsedGitHubWorkspaceApprovalSignature | null {
+  const scrubbed = scrubGitHubApprovalSignature(value);
+  if (scrubbed.includes("[REDACTED]")) return null;
+  const match = scrubbed.match(/^github-local-workspace:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9][0-9]*):([A-Za-z0-9][A-Za-z0-9._/-]{0,120})$/);
+  if (!match) return null;
+  const branchName = match[4];
+  if (
+    branchName.includes("..") ||
+    branchName.includes("//") ||
+    branchName.includes("@{") ||
+    branchName.startsWith("/") ||
+    branchName.endsWith("/")
+  ) {
+    return null;
+  }
+  return {
+    owner: match[1],
+    repo: match[2],
+    issueNumber: Number(match[3]),
+    branchName,
+  };
+}
+
+function scrubGitHubApprovalSignature(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
 }
 
 function buildGitHubIssuePlanPayload(args: string[], context: GatewayGitHubContext): GatewayBasicCommandPayload {
