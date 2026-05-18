@@ -1,4 +1,5 @@
 import type { RuntimeWorkflowRunSnapshot } from "./runtime/runtime-snapshot";
+import { scrubSecrets } from "./security/log-sanitizer";
 import {
   getWorkflowRecipe,
   listWorkflowRecipes,
@@ -49,12 +50,12 @@ export function latestWorkflowRun(runs: RuntimeWorkflowRunSnapshot[]): RuntimeWo
 
 export function workflowProgressLine(run: RuntimeWorkflowRunSnapshot): string {
   const title = run.title || run.definitionId || "untitled";
-  return `${run.runId} | ${title} | ${run.status} | ${run.completedSteps}/${run.totalSteps} steps`;
+  return `${redactWorkflowSurfaceText(run.runId)} | ${redactWorkflowSurfaceText(title)} | ${redactWorkflowSurfaceText(run.status)} | ${run.completedSteps}/${run.totalSteps} steps`;
 }
 
 export function workflowDetailLine(run: RuntimeWorkflowRunSnapshot): string {
   return [
-    `${run.runId} | ${run.status} | ${run.completedSteps}/${run.totalSteps} steps`,
+    `${redactWorkflowSurfaceText(run.runId)} | ${redactWorkflowSurfaceText(run.status)} | ${run.completedSteps}/${run.totalSteps} steps`,
     `artifacts ${run.artifactCount ?? 0}`,
     `checkpoints ${run.checkpointCount ?? 0}`,
   ].join(" | ");
@@ -66,8 +67,8 @@ export function workflowStatusLines(runs: RuntimeWorkflowRunSnapshot[]): string[
   const lines = [`Active/paused: ${activeWorkflowCount(runs)}`];
   if (latest) {
     lines.push(`Latest workflow: ${workflowDetailLine(latest)}`);
-    if (latest.awaitingStepId) lines.push(`Awaiting: ${latest.awaitingStepId}`);
-    if (latest.failedStepId) lines.push(`Failed step: ${latest.failedStepId}`);
+    if (latest.awaitingStepId) lines.push(`Awaiting: ${redactWorkflowSurfaceText(latest.awaitingStepId)}`);
+    if (latest.failedStepId) lines.push(`Failed step: ${redactWorkflowSurfaceText(latest.failedStepId)}`);
   }
   lines.push(`Inspect workflows: ${workflowInspectViews()}`);
   return lines;
@@ -239,19 +240,19 @@ function renderWorkflowRuntimeInspect(run: WorkflowRecipeRuntimeSnapshot): strin
   return [
     "Workflow Run:",
     "",
-    `Run: ${run.runId}`,
-    `Recipe: ${run.recipeId}`,
-    `Title: ${run.title}`,
-    `Status: ${run.status}`,
+    `Run: ${redactWorkflowSurfaceText(run.runId)}`,
+    `Recipe: ${redactWorkflowSurfaceText(run.recipeId)}`,
+    `Title: ${redactWorkflowSurfaceText(run.title)}`,
+    `Status: ${redactWorkflowSurfaceText(run.status)}`,
     `Progress: ${run.completedSteps}/${run.totalSteps} steps`,
-    run.awaitingStepId ? `Awaiting: ${run.awaitingStepId}` : "",
-    run.failedStepId ? `Failed step: ${run.failedStepId}` : "",
-    `Approval state: ${run.approvalState}`,
+    run.awaitingStepId ? `Awaiting: ${redactWorkflowSurfaceText(run.awaitingStepId)}` : "",
+    run.failedStepId ? `Failed step: ${redactWorkflowSurfaceText(run.failedStepId)}` : "",
+    `Approval state: ${redactWorkflowSurfaceText(run.approvalState)}`,
     `Artifacts: ${run.artifactCount}`,
     `Checkpoints: ${run.checkpointCount}`,
     `Updated: ${new Date(run.updatedAt).toISOString()}`,
     "",
-    `Next valid command: ${run.nextCommand}`,
+    `Next valid command: ${redactWorkflowSurfaceText(run.nextCommand)}`,
   ].filter(Boolean).join("\n");
 }
 
@@ -259,13 +260,13 @@ function renderWorkflowRuntimeArtifacts(run: WorkflowRecipeRuntimeSnapshot): str
   return [
     "Workflow Artifacts:",
     "",
-    `Run: ${run.runId}`,
-    `Recipe: ${run.recipeId}`,
+    `Run: ${redactWorkflowSurfaceText(run.runId)}`,
+    `Recipe: ${redactWorkflowSurfaceText(run.recipeId)}`,
     ...(run.artifacts.length === 0
       ? ["(No workflow artifacts recorded)"]
-      : run.artifacts.map((artifact) => `- ${artifact.id} | ${artifact.name} | ${artifact.type}`)),
+      : run.artifacts.map((artifact) => `- ${redactWorkflowSurfaceText(artifact.id)} | ${redactWorkflowSurfaceText(artifact.name)} | ${redactWorkflowSurfaceText(artifact.type)}`)),
     "",
-    `Next valid command: /workflow inspect ${run.runId}`,
+    `Next valid command: /workflow inspect ${redactWorkflowSurfaceText(run.runId)}`,
   ].join("\n");
 }
 
@@ -316,9 +317,9 @@ function renderWorkflowSummaryView(
   } else {
     for (const run of runs.slice(0, 8)) {
       lines.push(`- ${workflowProgressLine(run)}`);
-      if (run.awaitingStepId) lines.push(`  Awaiting: ${run.awaitingStepId}`);
-      if (run.failedStepId) lines.push(`  Failed step: ${run.failedStepId}`);
-      lines.push(`  Inspect: /workflow inspect ${run.runId}`);
+      if (run.awaitingStepId) lines.push(`  Awaiting: ${redactWorkflowSurfaceText(run.awaitingStepId)}`);
+      if (run.failedStepId) lines.push(`  Failed step: ${redactWorkflowSurfaceText(run.failedStepId)}`);
+      lines.push(`  Inspect: /workflow inspect ${redactWorkflowSurfaceText(run.runId)}`);
     }
   }
   lines.push("");
@@ -331,13 +332,13 @@ function renderWorkflowLatestView(run: RuntimeWorkflowRunSnapshot | null): strin
   if (!run) {
     lines.push("(No workflow runs recorded)");
   } else {
-    lines.push(`Run: ${run.runId}`);
-    lines.push(`Definition: ${run.definitionId ?? "unknown"}`);
-    lines.push(`Title: ${run.title ?? "untitled"}`);
-    lines.push(`Status: ${run.status}`);
+    lines.push(`Run: ${redactWorkflowSurfaceText(run.runId)}`);
+    lines.push(`Definition: ${redactWorkflowSurfaceText(run.definitionId ?? "unknown")}`);
+    lines.push(`Title: ${redactWorkflowSurfaceText(run.title ?? "untitled")}`);
+    lines.push(`Status: ${redactWorkflowSurfaceText(run.status)}`);
     lines.push(`Progress: ${run.completedSteps}/${run.totalSteps} steps`);
-    if (run.awaitingStepId) lines.push(`Awaiting: ${run.awaitingStepId}`);
-    if (run.failedStepId) lines.push(`Failed step: ${run.failedStepId}`);
+    if (run.awaitingStepId) lines.push(`Awaiting: ${redactWorkflowSurfaceText(run.awaitingStepId)}`);
+    if (run.failedStepId) lines.push(`Failed step: ${redactWorkflowSurfaceText(run.failedStepId)}`);
     lines.push(`Artifacts: ${run.artifactCount ?? 0}`);
     lines.push(`Checkpoints: ${run.checkpointCount ?? 0}`);
     if (typeof run.updatedAt === "number") lines.push(`Updated: ${new Date(run.updatedAt).toISOString()}`);
@@ -369,4 +370,10 @@ function missingWorkflowIdentifier(label: string, command: string): GatewayWorkf
     isError: true,
     data: { view: "missing_identifier", label },
   };
+}
+
+function redactWorkflowSurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
