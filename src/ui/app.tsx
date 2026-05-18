@@ -9,6 +9,12 @@ import { render, Text, Box, useApp, useInput, useStdin } from "ink";
 import TextInput from "ink-text-input";
 
 import { executeCommand, SlashCommandParser } from "../gateway";
+import { BrowserSidecarRuntime } from "../browser/browser-sidecar-runtime";
+import { WorkflowRecipeRuntime } from "../workflow/recipes/executable-recipes";
+import {
+  createBrowserExecutionHandlers,
+  createWorkflowRecipeExecutionHandlers,
+} from "../gateway-market-handoffs";
 import { recommendCompaction } from "../runtime/compaction";
 import type { SerializedMessage } from "../runtime/message";
 import { formatPendingApprovalMessage } from "../runtime/approval";
@@ -114,6 +120,16 @@ const ColonyApp: React.FC = () => {
   const scrollLog = useColonyStore((state) => state.scrollLog);
   const resetLogScroll = useColonyStore((state) => state.resetLogScroll);
   const inputLocked = Boolean(pendingApproval);
+  const browserRuntime = React.useMemo(() => new BrowserSidecarRuntime(), []);
+  const workflowRecipeRuntime = React.useMemo(() => new WorkflowRecipeRuntime(), []);
+  const browserExecutionHandlers = React.useMemo(
+    () => createBrowserExecutionHandlers(browserRuntime),
+    [browserRuntime],
+  );
+  const workflowRecipeExecutionHandlers = React.useMemo(
+    () => createWorkflowRecipeExecutionHandlers(workflowRecipeRuntime),
+    [workflowRecipeRuntime],
+  );
   const inspectPendingApproval = useCallback(() => {
     const store = useColonyStore.getState();
     const request = store.pendingApproval;
@@ -175,6 +191,12 @@ const ColonyApp: React.FC = () => {
         sessions: runtimeSummary.persistedSessions,
         swarm: {
           runs: runtimeSummary.swarmRuns,
+        },
+        browser: {
+          runtime: browserRuntime,
+        },
+        workflow: {
+          recipeRuntime: workflowRecipeRuntime,
         },
         runtime: {
           provider: store.provider,
@@ -245,6 +267,8 @@ const ColonyApp: React.FC = () => {
         cancelSwarm,
         resumeSwarm,
         retrySwarmStage,
+        ...browserExecutionHandlers,
+        ...workflowRecipeExecutionHandlers,
         showSystemMessage: (message) => {
           if (!message) return;
           useColonyStore.getState().addMessage("system", message);
@@ -258,7 +282,7 @@ const ColonyApp: React.FC = () => {
         isRunCancelling: () => useColonyStore.getState().interruptRequested,
       });
     },
-    [cancel, cancelSwarm, compactNow, exit, getPermissionSummary, getRuntimeSummary, latestCompactionHandoff, loadSessionHistory, recentCompactions, recentHookEvents, resetSession, resumeSession, resumeSwarm, retrySwarmStage, setMemoryTruthMode, setProviderSelection, startSwarm, submit],
+    [browserExecutionHandlers, browserRuntime, cancel, cancelSwarm, compactNow, exit, getPermissionSummary, getRuntimeSummary, latestCompactionHandoff, loadSessionHistory, recentCompactions, recentHookEvents, resetSession, resumeSession, resumeSwarm, retrySwarmStage, setMemoryTruthMode, setProviderSelection, startSwarm, submit, workflowRecipeExecutionHandlers, workflowRecipeRuntime],
   );
 
   const openSessionCatalog = useCallback(() => {
