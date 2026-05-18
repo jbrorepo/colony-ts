@@ -193,6 +193,7 @@ function scrubGitHubApprovalSignature(value: string): string {
 
 function buildGitHubIssuePlanPayload(args: string[], context: GatewayGitHubContext): GatewayBasicCommandPayload {
   const reference = args.join(" ").trim();
+  if (!requiredIdentifier(reference)) return missingGitHubIdentifier("GitHub issue reference", "/github issue plan <owner>/<repo>#<n>");
   const plan = createGitHubIssueIntakePlan({
     issue: { reference },
     workspaceRoot: context.workspaceRoot ?? ".",
