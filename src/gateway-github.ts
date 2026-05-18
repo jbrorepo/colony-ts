@@ -26,19 +26,23 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
     };
   }
   if (scope === "pr" && action === "plan") {
+    const runId = requiredIdentifier(args[2]);
+    if (!runId) return missingGitHubIdentifier("Run id", "/github pr plan <run_id>");
     return {
       output: [
         "GitHub PR Plan:",
         "",
-        `Run: ${args[2] ?? "missing"}`,
+        `Run: ${runId}`,
         "Approvals required: push, create_pr",
         "Next valid command: /github pr create <run_id> --approved",
       ].join("\n"),
-      data: { action: "github_pr_plan" },
+      data: { action: "github_pr_plan", runId },
     };
   }
   if (scope === "pr" && action === "create") {
     const approved = args.includes("--approved");
+    const runId = requiredIdentifier(args.slice(2).find((arg) => !arg.startsWith("--")));
+    if (!runId) return missingGitHubIdentifier("Run id", "/github pr create <run_id> --approved");
     return {
       output: [
         approved ? "GitHub PR creation approved." : "GitHub PR creation blocked.",
@@ -50,12 +54,13 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
         "Next valid command: /github pr status <receipt_id>",
       ].join("\n"),
       isError: !approved,
-      data: { action: approved ? "github_pr_create" : "github_pr_create_blocked" },
-      action: approved ? { kind: "github_pr_create", runId: args[2] ?? "", approved: true } : { kind: "display" },
+      data: { action: approved ? "github_pr_create" : "github_pr_create_blocked", runId },
+      action: approved ? { kind: "github_pr_create", runId, approved: true } : { kind: "display" },
     };
   }
   if (scope === "pr" && action === "status") {
-    const receiptId = args[2] ?? "";
+    const receiptId = requiredIdentifier(args[2]);
+    if (!receiptId) return missingGitHubIdentifier("Receipt id", "/github pr status <receipt_id>");
     const receipt = (context.receipts ?? []).find((candidate) => candidate.receiptId === receiptId);
     return {
       output: receipt ? renderGitHubPrReceiptStatus(receipt) : `GitHub PR Receipt:\n\nReceipt not found: ${receiptId}\nNext valid command: /github pr plan <run_id>`,
@@ -71,6 +76,24 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
       "Next valid command: /github issue plan <owner>/<repo>#<n>",
     ].join("\n"),
     data: { action: "github_status" },
+  };
+}
+
+function requiredIdentifier(value: string | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized || normalized.startsWith("--")) return null;
+  return normalized;
+}
+
+function missingGitHubIdentifier(label: string, command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      `${label} required.`,
+      "",
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "github_missing_identifier", label },
   };
 }
 
