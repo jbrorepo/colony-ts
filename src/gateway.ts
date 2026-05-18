@@ -176,6 +176,7 @@ import {
   buildGatewayPerfSnapshot,
 } from "./gateway-events-snapshot";
 import { buildWorkflowCommandPayload } from "./gateway-workflow";
+import { scrubSecrets } from "./security/log-sanitizer";
 import type { WorkflowRecipeRuntime } from "./workflow/recipes/executable-recipes";
 export {
   executeCommand,
@@ -215,6 +216,14 @@ function compactRecommendation(
     messageCount: count,
     caste: readString(ctx.session, ["caste"], ctx.permissions?.caste ?? "assist_ant"),
   });
+}
+
+function redactUnknownCommandName(rawName: string): string {
+  const trimmed = rawName.trim();
+  if (trimmed.startsWith("--")) return "[flag]";
+  return scrubSecrets(trimmed)
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
 }
 
 // ---------------------------------------------------------------------------
@@ -301,9 +310,10 @@ export class SlashCommandParser {
     const command = this.aliases.get(rawName) ?? rawName;
     const handler = this.commands.get(command);
     if (!handler) {
+      const safeName = redactUnknownCommandName(rawName);
       return result({
-        command: rawName,
-        output: `Unknown command: /${rawName}. Type /help for available commands.`,
+        command: safeName,
+        output: `Unknown command: /${safeName}. Type /help for available commands.`,
         isError: true,
       });
     }
