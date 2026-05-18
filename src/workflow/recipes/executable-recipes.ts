@@ -63,6 +63,7 @@ export class WorkflowRecipeRuntime {
   private readonly store = new InMemoryWorkflowStore();
   private readonly engine: WorkflowEngine;
   private readonly runRecipes = new Map<string, string>();
+  private readonly snapshots = new Map<string, WorkflowRecipeRuntimeSnapshot>();
 
   constructor(options: { now?: () => number } = {}) {
     this.engine = new WorkflowEngine({ store: this.store, now: options.now });
@@ -74,7 +75,7 @@ export class WorkflowRecipeRuntime {
     const started = await this.engine.start(recipe.definition);
     this.runRecipes.set(started.id, recipe.id);
     const run = await this.engine.runUntilBlocked(started.id, recipe.handlers);
-    return this.snapshot(run, recipe.id);
+    return this.cacheSnapshot(this.snapshot(run, recipe.id));
   }
 
   async resume(runId: string, opts: { approvedBy?: string } = {}): Promise<WorkflowRecipeRuntimeSnapshot> {
@@ -88,7 +89,7 @@ export class WorkflowRecipeRuntime {
       next = await this.engine.approveStep(runId, awaiting.id, opts.approvedBy ?? "operator");
     }
     next = await this.engine.runUntilBlocked(next.id, recipe.handlers);
-    return this.snapshot(next, recipe.id);
+    return this.cacheSnapshot(this.snapshot(next, recipe.id));
   }
 
   async cancel(runId: string): Promise<WorkflowRecipeRuntimeSnapshot> {
@@ -97,12 +98,23 @@ export class WorkflowRecipeRuntime {
     run.updatedAt = Date.now();
     await this.store.saveRun(run);
     const snapshot = this.snapshot(run, this.runRecipes.get(runId) ?? run.definitionId.replace(/^recipe_/, ""));
-    return { ...snapshot, status: "cancelled", nextCommand: "/workflow recipes" };
+    return this.cacheSnapshot({ ...snapshot, status: "cancelled", nextCommand: "/workflow recipes" });
   }
 
   async inspect(runId: string): Promise<WorkflowRecipeRuntimeSnapshot | null> {
     const run = await this.store.loadRun(runId);
-    return run ? this.snapshot(run, this.runRecipes.get(runId) ?? run.definitionId.replace(/^recipe_/, "")) : null;
+    return run ? this.cacheSnapshot(this.snapshot(run, this.runRecipes.get(runId) ?? run.definitionId.replace(/^recipe_/, ""))) : null;
+  }
+
+  inspectCached(runId: string): WorkflowRecipeRuntimeSnapshot | null {
+    const snapshot = this.snapshots.get(runId);
+    return snapshot ? cloneSnapshot(snapshot) : null;
+  }
+
+  listCached(): WorkflowRecipeRuntimeSnapshot[] {
+    return [...this.snapshots.values()]
+      .map(cloneSnapshot)
+      .sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
   private async requireRun(runId: string): Promise<WorkflowRun> {
@@ -132,6 +144,19 @@ export class WorkflowRecipeRuntime {
       artifacts: run.artifacts.map((artifact) => ({ id: artifact.id, name: artifact.name, type: artifact.type })),
     };
   }
+
+  private cacheSnapshot(snapshot: WorkflowRecipeRuntimeSnapshot): WorkflowRecipeRuntimeSnapshot {
+    const cloned = cloneSnapshot(snapshot);
+    this.snapshots.set(cloned.runId, cloned);
+    return cloneSnapshot(cloned);
+  }
+}
+
+function cloneSnapshot(snapshot: WorkflowRecipeRuntimeSnapshot): WorkflowRecipeRuntimeSnapshot {
+  return {
+    ...snapshot,
+    artifacts: snapshot.artifacts.map((artifact) => ({ ...artifact })),
+  };
 }
 
 function taskStep(id: string, title: string, task: string, dependsOn?: string[]) {

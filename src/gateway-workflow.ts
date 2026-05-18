@@ -5,6 +5,7 @@ import {
   type WorkflowRecipeDescriptor,
 } from "./workflow/recipes/gstack-inspired";
 import type { WorkflowRecipeRuntime } from "./workflow/recipes/executable-recipes";
+import type { WorkflowRecipeRuntimeSnapshot } from "./workflow/recipes/executable-recipes";
 
 export interface GatewayWorkflowCommandPayload {
   output: string;
@@ -106,6 +107,13 @@ export function buildWorkflowCommandPayload(opts: {
       };
     }
     if ("artifactsRun" in view) {
+      const runtimeRun = opts.recipeRuntime?.inspectCached(view.artifactsRun) ?? null;
+      if (runtimeRun) {
+        return {
+          output: renderWorkflowRuntimeArtifacts(runtimeRun),
+          data: { view: "artifacts", runId: runtimeRun.runId, count: runtimeRun.artifacts.length },
+        };
+      }
       return {
         output: [
           "Workflow Artifacts:",
@@ -118,10 +126,13 @@ export function buildWorkflowCommandPayload(opts: {
       };
     }
     if ("inspectRecipe" in view) {
-      const runtimeRun = view.inspectRecipe.startsWith("wfr_") && opts.recipeRuntime
-        ? null
-        : undefined;
-      void runtimeRun;
+      const runtimeRun = opts.recipeRuntime?.inspectCached(view.inspectRecipe) ?? null;
+      if (runtimeRun) {
+        return {
+          output: renderWorkflowRuntimeInspect(runtimeRun),
+          data: { view: "inspect", runId: runtimeRun.runId, recipe: runtimeRun.recipeId },
+        };
+      }
       const recipe = getWorkflowRecipe(view.inspectRecipe);
       if (!recipe) {
         return {
@@ -170,6 +181,40 @@ export function buildWorkflowCommandPayload(opts: {
     output: renderWorkflowSummaryView(selectedRuns, runs.length, view),
     data: { view, count: selectedRuns.length, total: runs.length },
   };
+}
+
+function renderWorkflowRuntimeInspect(run: WorkflowRecipeRuntimeSnapshot): string {
+  return [
+    "Workflow Run:",
+    "",
+    `Run: ${run.runId}`,
+    `Recipe: ${run.recipeId}`,
+    `Title: ${run.title}`,
+    `Status: ${run.status}`,
+    `Progress: ${run.completedSteps}/${run.totalSteps} steps`,
+    run.awaitingStepId ? `Awaiting: ${run.awaitingStepId}` : "",
+    run.failedStepId ? `Failed step: ${run.failedStepId}` : "",
+    `Approval state: ${run.approvalState}`,
+    `Artifacts: ${run.artifactCount}`,
+    `Checkpoints: ${run.checkpointCount}`,
+    `Updated: ${new Date(run.updatedAt).toISOString()}`,
+    "",
+    `Next valid command: ${run.nextCommand}`,
+  ].filter(Boolean).join("\n");
+}
+
+function renderWorkflowRuntimeArtifacts(run: WorkflowRecipeRuntimeSnapshot): string {
+  return [
+    "Workflow Artifacts:",
+    "",
+    `Run: ${run.runId}`,
+    `Recipe: ${run.recipeId}`,
+    ...(run.artifacts.length === 0
+      ? ["(No workflow artifacts recorded)"]
+      : run.artifacts.map((artifact) => `- ${artifact.id} | ${artifact.name} | ${artifact.type}`)),
+    "",
+    `Next valid command: /workflow inspect ${run.runId}`,
+  ].join("\n");
 }
 
 function renderWorkflowRecipesView(recipes: WorkflowRecipeDescriptor[]): string {
