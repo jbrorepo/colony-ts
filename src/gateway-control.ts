@@ -207,11 +207,11 @@ export function buildModelCommandPayload(opts: {
   }
 
   const lines = ["Model selection updated:", ""];
-  lines.push(`Selected provider: ${provider}`);
-  lines.push(`Selected model: ${model}`);
-  lines.push(`Current provider: ${runtime.provider ?? "unknown"}`);
-  lines.push(`Current model: ${runtime.model ?? "unknown"}`);
-  lines.push(`Next run: ${provider}:${model} primary`);
+  lines.push(`Selected provider: ${redactModelSelectionInput(provider)}`);
+  lines.push(`Selected model: ${redactModelSelectionInput(model)}`);
+  lines.push(`Current provider: ${redactModelSelectionInput(runtime.provider ?? "unknown")}`);
+  lines.push(`Current model: ${redactModelSelectionInput(runtime.model ?? "unknown")}`);
+  lines.push(`Next run: ${redactModelSelectionInput(provider)}:${redactModelSelectionInput(model)} primary`);
   lines.push("Inspect: /model | /provider current | /status");
   return {
     output: lines.join("\n"),

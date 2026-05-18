@@ -265,92 +265,92 @@ export function renderStatusRuntimeSection(section: GatewayStatusRuntimeSection)
     lines.push("(No runtime state)");
   } else {
     lines.push("Runtime:");
-    if (section.selectedProvider) lines.push(`Selected provider: ${section.selectedProvider}`);
-    if (section.selectedModel) lines.push(`Selected model: ${section.selectedModel}`);
-    if (section.memoryRecallLine) lines.push(section.memoryRecallLine);
-    lines.push(`Provider: ${section.provider ?? "unknown"}`);
-    lines.push(`Model: ${section.model ?? "unknown"}`);
-    lines.push(`Circuit: ${section.circuitState ?? "unknown"}`);
+    if (section.selectedProvider) lines.push(`Selected provider: ${redactRuntimeSurfaceText(section.selectedProvider)}`);
+    if (section.selectedModel) lines.push(`Selected model: ${redactRuntimeSurfaceText(section.selectedModel)}`);
+    if (section.memoryRecallLine) lines.push(redactRuntimeSurfaceText(section.memoryRecallLine));
+    lines.push(`Provider: ${redactRuntimeSurfaceText(section.provider ?? "unknown")}`);
+    lines.push(`Model: ${redactRuntimeSurfaceText(section.model ?? "unknown")}`);
+    lines.push(`Circuit: ${redactRuntimeSurfaceText(section.circuitState ?? "unknown")}`);
     lines.push(`Run active: ${section.runActive ? "yes" : "no"}`);
-    if (section.interruptLine) lines.push(section.interruptLine);
-    if (section.inspectLine) lines.push(section.inspectLine);
-    if (section.queuedPromptLine) lines.push(section.queuedPromptLine);
-    if (section.queuedCompactionLine) lines.push(section.queuedCompactionLine);
-    if (section.observedHealthLine) lines.push(section.observedHealthLine);
-    if (section.latestFailoverLine) lines.push(section.latestFailoverLine);
-    if (section.hooksLine) lines.push(section.hooksLine);
-    if (section.latestHookLine) lines.push(section.latestHookLine);
-    if (section.hookInspectLine) lines.push(section.hookInspectLine);
-    if (section.eventsLine) lines.push(section.eventsLine);
-    if (section.eventsInspectLine) lines.push(section.eventsInspectLine);
-    if (section.compactionHandoffLine) lines.push(section.compactionHandoffLine);
-    if (section.perfInspectLine) lines.push(section.perfInspectLine);
+    if (section.interruptLine) lines.push(redactRuntimeSurfaceText(section.interruptLine));
+    if (section.inspectLine) lines.push(redactRuntimeSurfaceText(section.inspectLine));
+    if (section.queuedPromptLine) lines.push(redactRuntimeSurfaceText(section.queuedPromptLine));
+    if (section.queuedCompactionLine) lines.push(redactRuntimeSurfaceText(section.queuedCompactionLine));
+    if (section.observedHealthLine) lines.push(redactRuntimeSurfaceText(section.observedHealthLine));
+    if (section.latestFailoverLine) lines.push(redactRuntimeSurfaceText(section.latestFailoverLine));
+    if (section.hooksLine) lines.push(redactRuntimeSurfaceText(section.hooksLine));
+    if (section.latestHookLine) lines.push(redactRuntimeSurfaceText(section.latestHookLine));
+    if (section.hookInspectLine) lines.push(redactRuntimeSurfaceText(section.hookInspectLine));
+    if (section.eventsLine) lines.push(redactRuntimeSurfaceText(section.eventsLine));
+    if (section.eventsInspectLine) lines.push(redactRuntimeSurfaceText(section.eventsInspectLine));
+    if (section.compactionHandoffLine) lines.push(redactRuntimeSurfaceText(section.compactionHandoffLine));
+    if (section.perfInspectLine) lines.push(redactRuntimeSurfaceText(section.perfInspectLine));
     if (section.recoveryLines?.length) {
       lines.push("Recovery:");
-      lines.push(...section.recoveryLines);
+      lines.push(...section.recoveryLines.map(redactRuntimeSurfaceText));
     }
   }
 
   if (section.workflowLines?.length) {
     lines.push("");
     lines.push("Workflows:");
-    lines.push(...section.workflowLines);
+    lines.push(...section.workflowLines.map(redactRuntimeSurfaceText));
   }
 
   if (section.startupChecksLine) {
     lines.push("");
     lines.push("Startup:");
-    lines.push(section.startupChecksLine);
-    if (section.startupIssueLine) lines.push(section.startupIssueLine);
-    if (section.startupFixLine) lines.push(section.startupFixLine);
-    if (section.startupInspectLine) lines.push(section.startupInspectLine);
+    lines.push(redactRuntimeSurfaceText(section.startupChecksLine));
+    if (section.startupIssueLine) lines.push(redactRuntimeSurfaceText(section.startupIssueLine));
+    if (section.startupFixLine) lines.push(redactRuntimeSurfaceText(section.startupFixLine));
+    if (section.startupInspectLine) lines.push(redactRuntimeSurfaceText(section.startupInspectLine));
   }
 
   if (section.contextUsedLine || section.contextUtilizationLine || section.contextFailureLine) {
     lines.push("");
     lines.push("Context:");
-    if (section.contextUsedLine) lines.push(section.contextUsedLine);
-    if (section.contextUtilizationLine) lines.push(section.contextUtilizationLine);
-    if (section.contextFailureLine) lines.push(section.contextFailureLine);
+    if (section.contextUsedLine) lines.push(redactRuntimeSurfaceText(section.contextUsedLine));
+    if (section.contextUtilizationLine) lines.push(redactRuntimeSurfaceText(section.contextUtilizationLine));
+    if (section.contextFailureLine) lines.push(redactRuntimeSurfaceText(section.contextFailureLine));
   }
 
   if (section.lastCompactionFailureLines?.length) {
     lines.push("");
-    lines.push(...section.lastCompactionFailureLines);
+    lines.push(...section.lastCompactionFailureLines.map(redactRuntimeSurfaceText));
   }
   if (section.lastCompactionLines?.length) {
     lines.push("");
-    lines.push(...section.lastCompactionLines);
+    lines.push(...section.lastCompactionLines.map(redactRuntimeSurfaceText));
   }
   if (section.workspaceLines?.length) {
     lines.push("");
     lines.push("Workspace:");
-    lines.push(...section.workspaceLines);
+    lines.push(...section.workspaceLines.map(redactRuntimeSurfaceText));
   }
   if (section.toolLines?.length) {
     lines.push("");
     lines.push("Tools:");
-    lines.push(...section.toolLines);
+    lines.push(...section.toolLines.map(redactRuntimeSurfaceText));
   }
   if (section.approvalLines?.length) {
     lines.push("");
     lines.push("Approvals:");
-    lines.push(...section.approvalLines);
+    lines.push(...section.approvalLines.map(redactRuntimeSurfaceText));
   }
   if (section.costSummaryLine) {
     lines.push("");
     lines.push("Cost Summary:");
-    lines.push(section.costSummaryLine);
+    lines.push(redactRuntimeSurfaceText(section.costSummaryLine));
   }
   if (section.budgetLines?.length) {
     lines.push("");
     lines.push("Budget:");
-    lines.push(...section.budgetLines);
+    lines.push(...section.budgetLines.map(redactRuntimeSurfaceText));
   }
   if (section.operatorActionLines?.length) {
     lines.push("");
     lines.push("Operator Next:");
-    lines.push(...section.operatorActionLines);
+    lines.push(...section.operatorActionLines.map(redactRuntimeSurfaceText));
   }
   return lines;
 }
@@ -403,10 +403,10 @@ export function renderModelStatusView(opts: {
   currentModel: string;
 }): string {
   const lines = ["Model Status:", ""];
-  lines.push(`Selected provider: ${opts.selectedProvider}`);
-  lines.push(`Selected model: ${opts.selectedModel}`);
-  lines.push(`Current provider: ${opts.currentProvider}`);
-  lines.push(`Current model: ${opts.currentModel}`);
+  lines.push(`Selected provider: ${redactRuntimeSurfaceText(opts.selectedProvider)}`);
+  lines.push(`Selected model: ${redactRuntimeSurfaceText(opts.selectedModel)}`);
+  lines.push(`Current provider: ${redactRuntimeSurfaceText(opts.currentProvider)}`);
+  lines.push(`Current model: ${redactRuntimeSurfaceText(opts.currentModel)}`);
   lines.push("Set current provider model: /model <model>");
   lines.push("Set named provider model: /model <provider> <model>");
   lines.push("Switch provider only: /provider use <name>");
