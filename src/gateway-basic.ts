@@ -4,6 +4,7 @@ import {
   normalizeCasteKey,
   tryResolveMethodCaste,
 } from "./caste/enums";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayBasicCommandPayload {
   output: string;
@@ -93,9 +94,9 @@ export function renderCasteView(caste: string): string {
   const legacyAlias = methodCaste
     ? listCasteCompatibilityRecords().find((record) => record.methodCaste === methodCaste)?.legacyCaste
     : undefined;
-  const lines = [`Current Caste: ${displayName}`, "", description];
+  const lines = [`Current Caste: ${displayName}`, "", redactBasicSurfaceText(description)];
   if (legacyAlias && normalizeCasteKey(caste) !== methodCaste) {
-    lines.push("", `Compatibility alias: ${legacyAlias}`);
+    lines.push("", `Compatibility alias: ${redactBasicSurfaceText(legacyAlias)}`);
   }
   return lines.join("\n");
 }
@@ -113,10 +114,10 @@ export function formatStatus(info: {
   const casteDisplay = formatOperatorCaste(info.caste);
   return [
     "┌─ Session Status ────────────────────────────────────────┐",
-    `│  Session:    ${info.sessionId.padEnd(42)}│`,
-    `│  Agent:      ${info.agentId.padEnd(42)}│`,
+    `│  Session:    ${redactBasicSurfaceText(info.sessionId).padEnd(42)}│`,
+    `│  Agent:      ${redactBasicSurfaceText(info.agentId).padEnd(42)}│`,
     `│  Caste:      ${casteDisplay.padEnd(42)}│`,
-    `│  State:      ${info.state.padEnd(42)}│`,
+    `│  State:      ${redactBasicSurfaceText(info.state).padEnd(42)}│`,
     `│  Messages:   ${String(info.messageCount).padEnd(42)}│`,
     `│  Iterations: ${String(info.iterations).padEnd(42)}│`,
     `│  Tokens:     ${info.tokensUsed.toLocaleString().padEnd(42)}│`,
@@ -127,7 +128,7 @@ export function formatStatus(info: {
 
 export function formatCaste(caste: string, description?: string): string {
   const displayName = formatOperatorCaste(caste);
-  const desc = description ?? `The ${displayName} caste`;
+  const desc = redactBasicSurfaceText(description ?? `The ${displayName} caste`);
   return [
     `Current Caste: ${displayName}`,
     `${desc}`,
@@ -148,7 +149,7 @@ export function formatPermissions(
   if (active.length > 0) {
     lines.push("│  Active tool schemas:");
     for (const tool of active) {
-      lines.push(`│    * ${tool}`);
+      lines.push(`│    * ${redactBasicSurfaceText(tool)}`);
     }
   } else {
     lines.push("│  Active tool schemas: none.");
@@ -156,13 +157,13 @@ export function formatPermissions(
   if (allowed.length > 0) {
     lines.push("│  Allowed:");
     for (const tool of allowed) {
-      lines.push(`│    + ${tool}`);
+      lines.push(`│    + ${redactBasicSurfaceText(tool)}`);
     }
   }
   if (denied.length > 0) {
     lines.push("│  Denied:");
     for (const tool of denied) {
-      lines.push(`│    - ${tool}`);
+      lines.push(`│    - ${redactBasicSurfaceText(tool)}`);
     }
   }
   if (allowed.length === 0 && denied.length === 0) {
@@ -171,7 +172,7 @@ export function formatPermissions(
   if (sessionRules.length > 0) {
     lines.push(`│  Exact-signature session rules: ${sessionRules.length}`);
     for (const rule of sessionRules) {
-      lines.push(`│    = ${rule}`);
+      lines.push(`│    = ${redactBasicSurfaceText(rule)}`);
     }
   } else {
     lines.push("│  Exact-signature session rules: none.");
@@ -182,17 +183,23 @@ export function formatPermissions(
 
 function formatOperatorCaste(caste: string): string {
   try {
-    return casteDisplayName(caste);
+    return redactBasicSurfaceText(casteDisplayName(caste));
   } catch {
-    return caste
+    const displayName = redactBasicSurfaceText(caste.trim().toLowerCase())
       .trim()
-      .toLowerCase()
       .replace(/[-\s]+/g, "_")
       .split("_")
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
+    return redactBasicSurfaceText(displayName);
   }
+}
+
+function redactBasicSurfaceText(value: string): string {
+  return scrubSecrets(value)
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
 
 export function buildBudgetCommandPayload(opts: {
