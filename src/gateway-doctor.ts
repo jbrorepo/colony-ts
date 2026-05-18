@@ -1,3 +1,5 @@
+import { scrubSecrets } from "./security/log-sanitizer";
+
 export type DoctorFilterMode =
   | "all"
   | "failing"
@@ -96,17 +98,33 @@ export function doctorInspectViews(): string {
   return "/doctor | /doctor errors | /doctor warnings | /doctor workspace | /doctor config | /doctor data | /doctor terminal | /doctor local | /doctor cloud | /doctor providers | /doctor failovers | /doctor first-run | /doctor setup | /doctor demo | /doctor release";
 }
 
+function redactDoctorQuery(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeDoctorQueryArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function normalizeDoctorQuery(value: string): string {
+  const redacted = redactDoctorQuery(value);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
 export function parseDoctorArgs(args: string[]): DoctorFilterSpec {
-  const first = (args[0] ?? "").trim().toLowerCase();
+  const queryArgs = normalizeDoctorQueryArgs(args);
+  const first = (queryArgs[0] ?? "").trim().toLowerCase();
   if (["all", "failing", "errors", "warnings", "passed", "providers", "failovers", "workspace", "config", "data", "terminal", "local", "cloud", "first-run", "setup", "demo", "release"].includes(first)) {
     return {
       mode: first as DoctorFilterMode,
-      query: args.slice(1).join(" ").trim().toLowerCase(),
+      query: normalizeDoctorQuery(queryArgs.slice(1).join(" ")),
     };
   }
   return {
     mode: "all",
-    query: args.join(" ").trim().toLowerCase(),
+    query: normalizeDoctorQuery(queryArgs.join(" ")),
   };
 }
 
