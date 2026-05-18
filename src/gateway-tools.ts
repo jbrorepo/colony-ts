@@ -301,11 +301,9 @@ export function renderToolsView(opts: {
       lines.push("(No tool activity in current live transcript)");
     } else {
       opts.recentActivity.forEach((activity, index) => {
-        const summary = [`${index + 1}. ${activity.toolName}`, activity.status];
-        if (activity.detail) summary.push(activity.detail);
-        lines.push(summary.join(" | "));
+        lines.push(formatToolActivityLine(index, activity));
         if (activity.artifactPath) {
-          lines.push(`   Reopen: /artifact "${activity.artifactPath}"`);
+          lines.push(formatArtifactReopenLine(activity.artifactPath));
         }
       });
       if (artifacts.length > 0) {
@@ -324,8 +322,8 @@ export function renderToolsView(opts: {
       lines.push("(No saved tool artifacts in current live transcript)");
     } else {
       artifacts.forEach((activity, index) => {
-        lines.push(`${index + 1}. ${activity.toolName} | ${activity.detail ?? "saved artifact"}`);
-        lines.push(`   Reopen: /artifact "${activity.artifactPath}"`);
+        lines.push(`${index + 1}. ${redactToolSurfaceText(activity.toolName)} | ${redactToolSurfaceText(activity.detail ?? "saved artifact")}`);
+        lines.push(formatArtifactReopenLine(activity.artifactPath ?? ""));
       });
     }
     lines.push("");
@@ -350,9 +348,9 @@ export function renderToolsView(opts: {
         (activity.durationMs ?? 0) > (current.durationMs ?? 0) ? activity : current,
       );
       lines.push(`Average duration: ${averageDuration}ms`);
-      lines.push(`Slowest: ${slowest.toolName} | ${slowest.durationMs}ms${slowest.detail ? ` | ${slowest.detail}` : ""}`);
+      lines.push(`Slowest: ${redactToolSurfaceText(slowest.toolName)} | ${slowest.durationMs}ms${slowest.detail ? ` | ${redactToolSurfaceText(slowest.detail)}` : ""}`);
       for (const activity of measured.slice().sort((left, right) => (right.durationMs ?? 0) - (left.durationMs ?? 0)).slice(0, 3)) {
-        lines.push(`- ${activity.toolName} | ${activity.durationMs}ms | ${activity.status}${activity.detail ? ` | ${activity.detail}` : ""}`);
+        lines.push(`- ${redactToolSurfaceText(activity.toolName)} | ${activity.durationMs}ms | ${redactToolSurfaceText(activity.status)}${activity.detail ? ` | ${redactToolSurfaceText(activity.detail)}` : ""}`);
       }
     }
     lines.push("");
@@ -360,6 +358,19 @@ export function renderToolsView(opts: {
   }
 
   return lines.join("\n");
+}
+
+function formatToolActivityLine(index: number, activity: GatewayToolActivity): string {
+  const summary = [
+    `${index + 1}. ${redactToolSurfaceText(activity.toolName)}`,
+    redactToolSurfaceText(activity.status),
+  ];
+  if (activity.detail) summary.push(redactToolSurfaceText(activity.detail));
+  return summary.join(" | ");
+}
+
+function formatArtifactReopenLine(artifactPath: string): string {
+  return `   Reopen: /artifact "${redactToolSurfaceText(artifactPath)}"`;
 }
 
 export function renderPermissionsView(opts: {
