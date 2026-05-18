@@ -28,11 +28,11 @@ export function resolveWorkflowView(args: string[]): WorkflowViewMode | { error:
   if (raw === "active" || raw === "running" || raw === "paused") return "active";
   if (raw === "latest" || raw === "recent") return "latest";
   if (raw === "recipes") return "recipes";
-  if (raw === "start") return { startRecipe: args[1] ?? "" };
-  if (raw === "inspect") return { inspectRecipe: args[1] ?? "" };
-  if (raw === "resume") return { resumeRun: args[1] ?? "" };
-  if (raw === "cancel") return { cancelRun: args[1] ?? "" };
-  if (raw === "artifacts") return { artifactsRun: args[1] ?? "" };
+  if (raw === "start") return { startRecipe: requiredWorkflowIdentifier(args[1]) ?? "" };
+  if (raw === "inspect") return { inspectRecipe: requiredWorkflowIdentifier(args[1]) ?? "" };
+  if (raw === "resume") return { resumeRun: requiredWorkflowIdentifier(args[1]) ?? "" };
+  if (raw === "cancel") return { cancelRun: requiredWorkflowIdentifier(args[1]) ?? "" };
+  if (raw === "artifacts") return { artifactsRun: requiredWorkflowIdentifier(args[1]) ?? "" };
   return {
     error: `Unknown workflow view '${raw}'.\n\nViews: ${workflowInspectViews()}`,
   };
@@ -110,6 +110,8 @@ export function buildWorkflowCommandPayload(opts: {
     if ("resumeRun" in view || "cancelRun" in view) {
       const runId = "resumeRun" in view ? view.resumeRun : view.cancelRun;
       const actionKind = "resumeRun" in view ? "resume_workflow_recipe" : "cancel_workflow_recipe";
+      const retryCommand = "resumeRun" in view ? "/workflow resume <run_id>" : "/workflow cancel <run_id>";
+      if (!runId) return missingWorkflowIdentifier("Workflow run id", retryCommand);
       return {
         output: [
           "Workflow Run Control:",
@@ -123,6 +125,7 @@ export function buildWorkflowCommandPayload(opts: {
       };
     }
     if ("artifactsRun" in view) {
+      if (!view.artifactsRun) return missingWorkflowIdentifier("Workflow run id", "/workflow artifacts <run_id>");
       const runtimeRun = opts.recipeRuntime?.inspectCached(view.artifactsRun) ?? null;
       if (runtimeRun) {
         return {
@@ -142,6 +145,7 @@ export function buildWorkflowCommandPayload(opts: {
       };
     }
     if ("inspectRecipe" in view) {
+      if (!view.inspectRecipe) return missingWorkflowIdentifier("Workflow run or recipe id", "/workflow inspect <recipe|run_id>");
       const runtimeRun = opts.recipeRuntime?.inspectCached(view.inspectRecipe) ?? null;
       if (runtimeRun) {
         return {
@@ -344,4 +348,24 @@ function renderWorkflowLatestView(run: RuntimeWorkflowRunSnapshot | null): strin
 
 function isActiveWorkflowStatus(status: string): boolean {
   return status === "pending" || status === "running" || status === "paused";
+}
+
+function requiredWorkflowIdentifier(value: string | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized || normalized.startsWith("--")) return null;
+  return normalized;
+}
+
+function missingWorkflowIdentifier(label: string, command: string): GatewayWorkflowCommandPayload {
+  return {
+    output: [
+      `${label} required.`,
+      "",
+      `Next valid command: ${command}`,
+      "",
+      `Views: ${workflowInspectViews()}`,
+    ].join("\n"),
+    isError: true,
+    data: { view: "missing_identifier", label },
+  };
 }
