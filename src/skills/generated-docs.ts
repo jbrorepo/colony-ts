@@ -1,4 +1,5 @@
 import type { SkillDefinition } from "./index";
+import { scrubSecrets } from "../security/log-sanitizer";
 
 export interface GeneratedSkillDocsToolDefinition {
   name?: string;
@@ -35,8 +36,8 @@ export function generateSkillDocsPreview(input: GeneratedSkillDocsPreviewInput):
   ];
 
   for (const skill of skills) {
-    lines.push("", `## ${skill.name}`);
-    lines.push(skill.description || "No description provided.");
+    lines.push("", `## ${redactGeneratedDocsText(skill.name)}`);
+    lines.push(redactGeneratedDocsText(skill.description || "No description provided."));
     lines.push(`Tools required: ${formatList(skill.toolsRequired)}`);
     lines.push(`Requires approval: ${formatList(skill.requiresApproval)}`);
     lines.push(`Tags: ${formatList(skill.tags)}`);
@@ -49,7 +50,7 @@ export function generateSkillDocsPreview(input: GeneratedSkillDocsPreviewInput):
     lines.push("No active tool metadata supplied.");
   } else {
     for (const tool of tools) {
-      lines.push(`- ${toolName(tool)} | risk ${tool.riskLevel ?? tool.category ?? "unknown"} | approval ${tool.requiresApproval ? "yes" : "unknown"} | ${tool.description ?? "no description"}`);
+      lines.push(`- ${redactGeneratedDocsText(toolName(tool))} | risk ${redactGeneratedDocsText(tool.riskLevel ?? tool.category ?? "unknown")} | approval ${tool.requiresApproval ? "yes" : "unknown"} | ${redactGeneratedDocsText(tool.description ?? "no description")}`);
     }
   }
 
@@ -77,9 +78,15 @@ function formatSource(skill: SkillDefinition): string {
     skill.source.ref,
     skill.source.revision,
   ].filter((part): part is string => Boolean(part));
-  return parts.length > 0 ? parts.join(" ") : "not specified";
+  return parts.length > 0 ? parts.map(redactGeneratedDocsText).join(" ") : "not specified";
 }
 
 function formatList(values: string[]): string {
-  return values.length > 0 ? values.join(", ") : "none";
+  return values.length > 0 ? values.map(redactGeneratedDocsText).join(", ") : "none";
+}
+
+function redactGeneratedDocsText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }

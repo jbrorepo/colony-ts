@@ -78,7 +78,7 @@ export function buildSkillsCommandPayload(
     const skill = skills.find((candidate) => candidate.name.toLowerCase() === name.value.toLowerCase());
     if (!skill) {
       return {
-        output: `Skill not found: ${name.value}\n\nInspect: /skills | /skills search <query>`,
+        output: `Skill not found: ${redactSkillSurfaceText(name.value)}\n\nInspect: /skills | /skills search <query>`,
         isError: true,
         data: { action: "skills_missing", name: name.value },
       };
@@ -206,7 +206,7 @@ function renderSkillsList(skills: SkillDefinition[]): string {
     lines.push("No skills are loaded in this runtime snapshot.");
   } else {
     for (const skill of skills) {
-      lines.push(`- ${skill.name} | ${skill.description || "no description"} | tags ${formatList(skill.tags)}`);
+      lines.push(`- ${redactSkillSurfaceText(skill.name)} | ${redactSkillSurfaceText(skill.description || "no description")} | tags ${formatList(skill.tags)}`);
     }
   }
   lines.push("");
@@ -215,12 +215,12 @@ function renderSkillsList(skills: SkillDefinition[]): string {
 }
 
 function renderSkillSearch(query: string, matches: SkillDefinition[]): string {
-  const lines = [`Skill Search: ${query}`, ""];
+  const lines = [`Skill Search: ${redactSkillSurfaceText(query)}`, ""];
   if (matches.length === 0) {
     lines.push("No matching skills found.");
   } else {
     for (const skill of matches) {
-      lines.push(`- ${skill.name} | ${skill.description || "no description"} | tags ${formatList(skill.tags)}`);
+      lines.push(`- ${redactSkillSurfaceText(skill.name)} | ${redactSkillSurfaceText(skill.description || "no description")} | tags ${formatList(skill.tags)}`);
     }
   }
   lines.push("");
@@ -230,17 +230,17 @@ function renderSkillSearch(query: string, matches: SkillDefinition[]): string {
 
 function renderSkillInspect(skill: SkillDefinition): string {
   const preview = buildSkillPromptInstructions([skill], { maxChars: 700 });
-  const lines = [`Skill: ${skill.name}`, ""];
-  lines.push(`Description: ${skill.description || "none"}`);
-  if (skill.caste) lines.push(`Caste: ${skill.caste}`);
-  lines.push(`Trust: ${skill.trustLevel ?? "not specified"}`);
+  const lines = [`Skill: ${redactSkillSurfaceText(skill.name)}`, ""];
+  lines.push(`Description: ${redactSkillSurfaceText(skill.description || "none")}`);
+  if (skill.caste) lines.push(`Caste: ${redactSkillSurfaceText(skill.caste)}`);
+  lines.push(`Trust: ${redactSkillSurfaceText(String(skill.trustLevel ?? "not specified"))}`);
   lines.push(`Tags: ${formatList(skill.tags)}`);
   lines.push(`Tools required: ${formatList(skill.toolsRequired)}`);
   lines.push(`Requires approval: ${formatList(skill.requiresApproval)}`);
-  lines.push(`Path: ${skill.relativePath}`);
+  lines.push(`Path: ${redactSkillSurfaceText(skill.relativePath)}`);
   lines.push("");
   lines.push("Prompt preview:");
-  lines.push(preview);
+  lines.push(redactSkillSurfaceText(preview));
   lines.push("");
   lines.push("Inspect: /skills | /skills search <query>");
   return lines.join("\n");
@@ -264,7 +264,7 @@ function renderSkillAudit(audit: ReturnType<typeof auditSkillCatalog>): string {
     lines.push("");
     lines.push("Aliases:");
     for (const entry of aliases) {
-      lines.push(`- ${entry.name} -> ${entry.canonicalName}`);
+      lines.push(`- ${redactSkillSurfaceText(entry.name)} -> ${redactSkillSurfaceText(entry.canonicalName)}`);
     }
   }
 
@@ -273,11 +273,11 @@ function renderSkillAudit(audit: ReturnType<typeof auditSkillCatalog>): string {
     lines.push("");
     lines.push("Issues:");
     for (const entry of issueEntries) {
-      const issueCodes = entry.issues.map((issue) => issue.code).join(", ");
+      const issueCodes = entry.issues.map((issue) => redactSkillSurfaceText(issue.code)).join(", ");
       const name = entry.canonicalName === entry.name ? entry.name : `${entry.name} -> ${entry.canonicalName}`;
-      lines.push(`- ${name} | ${entry.classification} | ${issueCodes}`);
+      lines.push(`- ${redactSkillSurfaceText(name)} | ${redactSkillSurfaceText(entry.classification)} | ${issueCodes}`);
       if (entry.source?.revision && entry.expectedSource?.revision && entry.source.revision !== entry.expectedSource.revision) {
-        lines.push(`  Source revision: ${entry.source.revision} -> ${entry.expectedSource.revision}`);
+        lines.push(`  Source revision: ${redactSkillSurfaceText(entry.source.revision)} -> ${redactSkillSurfaceText(entry.expectedSource.revision)}`);
       }
     }
   }
@@ -301,13 +301,13 @@ function renderSkillSourcePlan(plan: ReturnType<typeof planSkillSourceUpdates>):
     lines.push("");
     lines.push("Actions:");
     for (const action of plan.actions) {
-      lines.push(`- ${action.skillName} | ${action.action} | ${action.reasons.join(", ")}`);
+      lines.push(`- ${redactSkillSurfaceText(action.skillName)} | ${redactSkillSurfaceText(action.action)} | ${formatList(action.reasons)}`);
       if (action.source?.revision && action.expectedSource?.revision && action.source.revision !== action.expectedSource.revision) {
-        lines.push(`  Source revision: ${action.source.revision} -> ${action.expectedSource.revision}`);
+        lines.push(`  Source revision: ${redactSkillSurfaceText(action.source.revision)} -> ${redactSkillSurfaceText(action.expectedSource.revision)}`);
       } else if (action.expectedSource?.revision) {
-        lines.push(`  Expected revision: ${action.expectedSource.revision}`);
+        lines.push(`  Expected revision: ${redactSkillSurfaceText(action.expectedSource.revision)}`);
       }
-      lines.push(`  Preview: ${action.commandPreview}`);
+      lines.push(`  Preview: ${redactSkillSurfaceText(action.commandPreview)}`);
     }
   }
 
@@ -348,10 +348,10 @@ function buildStagedSkillsPayload(
     if (!skill) return missingStagedSkill(skillName);
     return {
       output: [
-        `Staged Skill Approval: ${skill.name}`,
+        `Staged Skill Approval: ${redactSkillSurfaceText(skill.name)}`,
         "",
         "Second approval required before promotion.",
-        `Run: /skills staged promote ${skill.name} --approved`,
+        `Run: /skills staged promote ${redactSkillSurfaceText(skill.name)} --approved`,
         "",
         "This view does not write files. Promotion still requires the host to call the fail-closed promotion API.",
       ].join("\n"),
@@ -364,7 +364,7 @@ function buildStagedSkillsPayload(
     if (!skill) return missingStagedSkill(skillName);
     if (!args.includes("--approved")) {
       return {
-        output: `Second approval required before promotion.\n\nUse /skills staged approve ${skill.name} first.`,
+        output: `Second approval required before promotion.\n\nUse /skills staged approve ${redactSkillSurfaceText(skill.name)} first.`,
         isError: true,
         data: { action: "skills_staged_promote_blocked", name: skill.name },
       };
@@ -373,7 +373,7 @@ function buildStagedSkillsPayload(
     if (!promotion) {
       return {
         output: [
-          `Promotion Status: unavailable for ${skill.name}`,
+          `Promotion Status: unavailable for ${redactSkillSurfaceText(skill.name)}`,
           "",
           "The operator view has approval, but no promotion result was supplied by the host.",
           "Host must call promoteStagedSkillCandidate() and pass its result back for rendering.",
@@ -393,7 +393,7 @@ function buildStagedSkillsPayload(
       if (!rollback) {
         return {
           output: [
-            `Rollback Status: unavailable for ${skill.name}`,
+            `Rollback Status: unavailable for ${redactSkillSurfaceText(skill.name)}`,
             "",
             "The operator view has approval, but no rollback result was supplied by the host.",
             "Host must call rollbackPromotedSkillCandidate() and pass its result back for rendering.",
@@ -444,8 +444,12 @@ function validateSkillLookupName(value: string | undefined): SkillLookupNameVali
 
 function redactSkillLookupText(value: string): string {
   return scrubSecrets(value)
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
+}
+
+function redactSkillSurfaceText(value: string): string {
+  return redactSkillLookupText(value.replace(/[\r\n]+/g, " ").trim());
 }
 
 function missingSkillName(command: string): GatewayBasicCommandPayload {
@@ -517,7 +521,7 @@ function renderStagedSkillsList(context: GatewaySkillsStageContext): GatewayBasi
     for (const skill of stagedSkills) {
       const manifest = findManifest(context.stageManifests ?? [], skill.name);
       const status = readString(manifest, "status", "staged");
-      lines.push(`- ${skill.name} | ${status} | ${skill.source.revision ?? "unknown-revision"}`);
+      lines.push(`- ${redactSkillSurfaceText(skill.name)} | ${redactSkillSurfaceText(status)} | ${redactSkillSurfaceText(skill.source.revision ?? "unknown-revision")}`);
     }
   }
   lines.push("");
@@ -533,15 +537,15 @@ function renderStagedSkillPreview(
   context: GatewaySkillsStageContext,
 ): GatewayBasicCommandPayload {
   const manifest = findManifest(context.stageManifests ?? [], skill.name);
-  const lines = [`Staged Skill Preview: ${skill.name}`, ""];
-  lines.push(`Description: ${skill.description || "none"}`);
-  lines.push(`Stage status: ${readString(manifest, "status", "unknown")}`);
-  lines.push(`Source repo: ${skill.source.repo ?? "unknown"}`);
-  lines.push(`Source path: ${skill.source.path ?? "unknown"}`);
-  lines.push(`Source ref: ${skill.source.ref ?? "unknown"}`);
-  lines.push(`Source revision: ${skill.source.revision ?? "unknown"}`);
+  const lines = [`Staged Skill Preview: ${redactSkillSurfaceText(skill.name)}`, ""];
+  lines.push(`Description: ${redactSkillSurfaceText(skill.description || "none")}`);
+  lines.push(`Stage status: ${redactSkillSurfaceText(readString(manifest, "status", "unknown"))}`);
+  lines.push(`Source repo: ${redactSkillSurfaceText(skill.source.repo ?? "unknown")}`);
+  lines.push(`Source path: ${redactSkillSurfaceText(skill.source.path ?? "unknown")}`);
+  lines.push(`Source ref: ${redactSkillSurfaceText(skill.source.ref ?? "unknown")}`);
+  lines.push(`Source revision: ${redactSkillSurfaceText(skill.source.revision ?? "unknown")}`);
   lines.push("");
-  lines.push(`Next: /skills staged audit ${skill.name} | /skills staged approve ${skill.name}`);
+  lines.push(`Next: /skills staged audit ${redactSkillSurfaceText(skill.name)} | /skills staged approve ${redactSkillSurfaceText(skill.name)}`);
   return {
     output: lines.join("\n"),
     data: { action: "skills_staged_preview", name: skill.name },
@@ -557,14 +561,14 @@ function renderStagedSkillAudit(
     expectedSources: context.expectedSources ?? {},
   });
   const entry = audit.entries[0];
-  const lines = [`Staged Skill Audit: ${skill.name}`, ""];
+  const lines = [`Staged Skill Audit: ${redactSkillSurfaceText(skill.name)}`, ""];
   lines.push(`Valid: ${audit.validSkills === 1 ? "yes" : "no"}`);
-  lines.push(`Issues: ${entry?.issues.map((issue) => issue.code).join(", ") || "none"}`);
+  lines.push(`Issues: ${entry?.issues.map((issue) => redactSkillSurfaceText(issue.code)).join(", ") || "none"}`);
   lines.push(`Missing source: ${audit.sourceMissingCount}`);
   lines.push(`Stale source: ${audit.sourceStaleCount}`);
   lines.push(`Source mismatches: ${audit.sourceMismatchCount}`);
   lines.push("");
-  lines.push(`Next: /skills staged approve ${skill.name}`);
+  lines.push(`Next: /skills staged approve ${redactSkillSurfaceText(skill.name)}`);
   return {
     output: lines.join("\n"),
     data: {
@@ -583,14 +587,14 @@ function renderPromotionResult(
 ): GatewayBasicCommandPayload {
   const manifest = findManifest(context.promotionManifests ?? [], skill.name);
   const manifestPath = promotion.manifestPath ?? readString(manifest, "manifestPath");
-  const lines = [`Promotion Status: ${promotion.status}`, ""];
-  lines.push(`Skill: ${skill.name}`);
-  lines.push(`Live: ${promotion.livePath ?? "not written"}`);
-  lines.push(`Rollback: ${promotion.rollbackPath ?? "not available"}`);
-  lines.push(`Manifest: ${manifestPath || "not available"}`);
-  lines.push(`Reason: ${promotion.reason}`);
+  const lines = [`Promotion Status: ${redactSkillSurfaceText(promotion.status)}`, ""];
+  lines.push(`Skill: ${redactSkillSurfaceText(skill.name)}`);
+  lines.push(`Live: ${redactSkillSurfaceText(promotion.livePath ?? "not written")}`);
+  lines.push(`Rollback: ${redactSkillSurfaceText(promotion.rollbackPath ?? "not available")}`);
+  lines.push(`Manifest: ${redactSkillSurfaceText(manifestPath || "not available")}`);
+  lines.push(`Reason: ${redactSkillSurfaceText(promotion.reason)}`);
   lines.push("");
-  lines.push(`Rollback view: /skills staged rollback ${skill.name}`);
+  lines.push(`Rollback view: /skills staged rollback ${redactSkillSurfaceText(skill.name)}`);
   return {
     output: lines.join("\n"),
     isError: promotion.status !== "promoted",
@@ -605,9 +609,9 @@ function renderRollbackEvidence(
 ): GatewayBasicCommandPayload {
   const manifest = findManifest(context.promotionManifests ?? [], skill.name);
   const rollbackPath = promotion?.rollbackPath ?? readString(manifest, "rollbackPath");
-  const lines = [`Rollback Evidence: ${skill.name}`, ""];
-  lines.push(`Rollback path: ${rollbackPath || "not available"}`);
-  lines.push(`Promotion manifest: ${promotion?.manifestPath ?? readString(manifest, "manifestPath", "not available")}`);
+  const lines = [`Rollback Evidence: ${redactSkillSurfaceText(skill.name)}`, ""];
+  lines.push(`Rollback path: ${redactSkillSurfaceText(rollbackPath || "not available")}`);
+  lines.push(`Promotion manifest: ${redactSkillSurfaceText(promotion?.manifestPath ?? readString(manifest, "manifestPath", "not available"))}`);
   lines.push("");
   lines.push("No rollback is applied by this view. It only exposes rollback evidence.");
   return {
@@ -624,12 +628,12 @@ function renderRollbackResult(
 ): GatewayBasicCommandPayload {
   const manifest = findManifest(context.rollbackManifests ?? [], skill.name);
   const manifestPath = rollback.manifestPath ?? readString(manifest, "manifestPath");
-  const lines = [`Rollback Status: ${rollback.status}`, ""];
-  lines.push(`Skill: ${skill.name}`);
-  lines.push(`Live: ${rollback.livePath ?? "not restored"}`);
-  lines.push(`Rollback evidence: ${rollback.rollbackPath ?? "not available"}`);
-  lines.push(`Manifest: ${manifestPath || "not available"}`);
-  lines.push(`Reason: ${rollback.reason}`);
+  const lines = [`Rollback Status: ${redactSkillSurfaceText(rollback.status)}`, ""];
+  lines.push(`Skill: ${redactSkillSurfaceText(skill.name)}`);
+  lines.push(`Live: ${redactSkillSurfaceText(rollback.livePath ?? "not restored")}`);
+  lines.push(`Rollback evidence: ${redactSkillSurfaceText(rollback.rollbackPath ?? "not available")}`);
+  lines.push(`Manifest: ${redactSkillSurfaceText(manifestPath || "not available")}`);
+  lines.push(`Reason: ${redactSkillSurfaceText(rollback.reason)}`);
   return {
     output: lines.join("\n"),
     isError: rollback.status !== "rolled_back",
@@ -642,13 +646,13 @@ function renderStagedSkillHistory(
   context: GatewaySkillsStageContext,
 ): GatewayBasicCommandPayload {
   const events = resolveLifecycleEvents(context).filter((event) => event.skillName.toLowerCase() === skill.name.toLowerCase());
-  const lines = [`Staged Skill History: ${skill.name}`, ""];
+  const lines = [`Staged Skill History: ${redactSkillSurfaceText(skill.name)}`, ""];
 
   if (events.length === 0) {
     lines.push("No staged lifecycle events are available in this runtime snapshot.");
   } else {
     for (const event of events) {
-      lines.push(`- ${event.event} | ${event.status} | approvedBy ${event.approvedBy ?? "unknown"}`);
+      lines.push(`- ${redactSkillSurfaceText(event.event)} | ${redactSkillSurfaceText(event.status)} | approvedBy ${redactSkillSurfaceText(event.approvedBy ?? "unknown")}`);
       const details = formatLifecycleEventDetails(event);
       if (details.length > 0) lines.push(`  ${details.join(" | ")}`);
       const paths = formatLifecycleEventPaths(event);
@@ -666,7 +670,7 @@ function renderStagedSkillHistory(
 
 function missingStagedSkill(name: string): GatewayBasicCommandPayload {
   return {
-    output: `Staged skill not found: ${name}\n\nInspect: /skills staged`,
+    output: `Staged skill not found: ${redactSkillSurfaceText(name)}\n\nInspect: /skills staged`,
     isError: true,
     data: { action: "skills_staged_missing", name },
   };
@@ -698,19 +702,19 @@ function resolveLifecycleEvents(context: GatewaySkillsStageContext): SkillLifecy
 
 function formatLifecycleEventDetails(event: SkillLifecycleEvent): string[] {
   const details: string[] = [];
-  if (event.sourceRevision) details.push(`source ${event.sourceRevision}`);
-  if (event.restoredSourceRevision) details.push(`restored ${event.restoredSourceRevision}`);
-  if (event.replacedSourceRevision) details.push(`replaced ${event.replacedSourceRevision}`);
-  if (event.reason) details.push(`reason ${event.reason}`);
+  if (event.sourceRevision) details.push(`source ${redactSkillSurfaceText(event.sourceRevision)}`);
+  if (event.restoredSourceRevision) details.push(`restored ${redactSkillSurfaceText(event.restoredSourceRevision)}`);
+  if (event.replacedSourceRevision) details.push(`replaced ${redactSkillSurfaceText(event.replacedSourceRevision)}`);
+  if (event.reason) details.push(`reason ${redactSkillSurfaceText(event.reason)}`);
   return details;
 }
 
 function formatLifecycleEventPaths(event: SkillLifecycleEvent): string[] {
   const paths: string[] = [];
-  if (event.stagingPath) paths.push(`staging ${event.stagingPath}`);
-  if (event.livePath) paths.push(`live ${event.livePath}`);
-  if (event.rollbackPath) paths.push(`rollback ${event.rollbackPath}`);
-  if (event.manifestPath) paths.push(`manifest ${event.manifestPath}`);
+  if (event.stagingPath) paths.push(`staging ${redactSkillSurfaceText(event.stagingPath)}`);
+  if (event.livePath) paths.push(`live ${redactSkillSurfaceText(event.livePath)}`);
+  if (event.rollbackPath) paths.push(`rollback ${redactSkillSurfaceText(event.rollbackPath)}`);
+  if (event.manifestPath) paths.push(`manifest ${redactSkillSurfaceText(event.manifestPath)}`);
   return paths;
 }
 
@@ -726,5 +730,5 @@ function searchSkills(skills: SkillDefinition[], query: string): SkillDefinition
 }
 
 function formatList(values: string[]): string {
-  return values.length > 0 ? values.join(", ") : "none";
+  return values.length > 0 ? values.map(redactSkillSurfaceText).join(", ") : "none";
 }
