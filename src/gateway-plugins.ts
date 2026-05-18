@@ -15,6 +15,7 @@ export interface GatewayPluginsContext {
 export function buildPluginsCommandPayload(args: string[], context: GatewayPluginsContext = {}): GatewayBasicCommandPayload {
   const command = (args[0] ?? "status").toLowerCase();
   const entries = context.entries ?? [];
+  const receipts = context.receipts ?? [];
   if (command === "trusted") {
     return {
       output: [
@@ -67,7 +68,34 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
         : { kind: "display" },
     };
   }
-  const receipts = context.receipts ?? [];
+  if (command === "status" && args.length > 1) {
+    const id = requiredPluginId(args[1]);
+    if (!id) return missingPluginId("/plugins status <id>");
+    if (!id.ok) return rejectedPluginId("/plugins status <id>");
+    const entry = entries.find((candidate) => candidate.id === id.value) ?? null;
+    const pluginReceipts = receipts.filter((receipt) => receipt.pluginId === id.value);
+    if (!entry && pluginReceipts.length === 0) {
+      return {
+        output: [
+          `Plugin not found: ${id.value}`,
+          "",
+          "Trusted local plugin status can only inspect supplied local descriptors or recorded activation receipts.",
+          "Next valid command: /plugins trusted | /plugins preflight <id>",
+        ].join("\n"),
+        isError: true,
+        data: { action: "plugins_status_detail", pluginId: id.value, found: false },
+      };
+    }
+    return {
+      output: renderPluginStatusDetail(id.value, entry, pluginReceipts),
+      data: {
+        action: "plugins_status_detail",
+        pluginId: id.value,
+        found: true,
+        receiptCount: pluginReceipts.length,
+      },
+    };
+  }
   return {
     output: [
       "Plugin Status:",
@@ -121,6 +149,31 @@ function rejectedPluginId(command: string): GatewayBasicCommandPayload {
     isError: true,
     data: { action: "plugins_rejected_id" },
   };
+}
+
+function renderPluginStatusDetail(
+  pluginId: string,
+  entry: TrustedLocalPluginEntry | null,
+  receipts: TrustedPluginActivationReceipt[],
+): string {
+  const latestReceipt = receipts.at(-1) ?? null;
+  return [
+    `Plugin Status: ${pluginId}`,
+    "",
+    `Source: ${entry?.source ?? "receipt-only"}`,
+    `Installed: ${entry ? yesNo(entry.installed) : "unknown"}`,
+    `Trusted: ${entry ? yesNo(entry.trusted) : "unknown"}`,
+    `Active: ${latestReceipt ? yesNo(latestReceipt.active) : "unknown"}`,
+    `Last receipt: ${latestReceipt?.receiptId ?? "none"}`,
+    `Receipt ok: ${latestReceipt ? yesNo(latestReceipt.ok) : "unknown"}`,
+    latestReceipt?.reason ? `Reason: ${latestReceipt.reason}` : "",
+    "Registry fetch executed: no",
+    "Package code executed: no",
+    "Credentials persisted: no",
+    "Default execution: no",
+    "",
+    "Next valid command: /plugins preflight <id> | /plugins activate <id> --approved | /plugins deactivate <id> --approved",
+  ].filter(Boolean).join("\n");
 }
 
 function scrubPluginId(value: string): string {
