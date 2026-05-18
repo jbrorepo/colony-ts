@@ -1,6 +1,7 @@
 import type { SlashCommandContext } from "./gateway-contract";
 import { normalizeProviderAlias } from "./gateway-provider";
 import { recentToolActivity, type GatewayToolActivity } from "./gateway-tools";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface RuntimeEventLine {
   kind: "tool" | "hook" | "compaction" | "failover";
@@ -327,8 +328,23 @@ export function perfInspectViews(): string {
   return "/perf | /perf runtime | /perf models | /perf providers | /perf tools | /perf hooks | /perf compactions";
 }
 
+function redactViewInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+}
+
+function normalizeViewInput(value: string): string {
+  const redacted = redactViewInput(value);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeViewArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
 export function resolveEventsView(args: string[]): GatewayEventsViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeViewInput(normalizeViewArgs(args)[0] ?? "");
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "recent" || raw === "timeline") return "recent";
   if (raw === "failures" || raw === "errors" || raw === "alerts") return "failures";
@@ -343,7 +359,7 @@ export function resolveEventsView(args: string[]): GatewayEventsViewMode | { err
 }
 
 export function resolvePerfView(args: string[]): GatewayPerfViewMode | { error: string } {
-  const raw = args[0]?.trim().toLowerCase();
+  const raw = normalizeViewInput(normalizeViewArgs(args)[0] ?? "");
   if (!raw || raw === "summary" || raw === "all") return "summary";
   if (raw === "runtime" || raw === "events") return "runtime";
   if (raw === "models" || raw === "model" || raw === "cost") return "models";
