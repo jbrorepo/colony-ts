@@ -1,4 +1,4 @@
-export type StatusViewMode = "summary" | "session" | "saved" | "runtime";
+export type StatusViewMode = "summary" | "session" | "saved" | "runtime" | "operator";
 
 export interface GatewayStatusCommandPayload {
   output: string;
@@ -88,7 +88,7 @@ export interface GatewayStatusRuntimeSection {
 }
 
 export function statusInspectViews(): string {
-  return "/status | /status session | /status saved | /status runtime";
+  return "/status | /status session | /status saved | /status runtime | /status operator";
 }
 
 export function resolveStatusView(args: string[]): StatusViewMode | { error: string } {
@@ -97,6 +97,7 @@ export function resolveStatusView(args: string[]): StatusViewMode | { error: str
   if (raw === "session" || raw === "live" || raw === "current") return "session";
   if (raw === "saved" || raw === "sessions" || raw === "persisted") return "saved";
   if (raw === "runtime" || raw === "run") return "runtime";
+  if (raw === "operator") return "operator";
   return {
     error: `Unknown status view '${raw}'.\n\nViews: ${statusInspectViews()}`,
   };
@@ -152,7 +153,7 @@ export function renderStatusViewOutput(opts: {
     ? opts.sessionLines
     : opts.view === "saved"
       ? opts.savedLines
-      : opts.view === "runtime"
+      : opts.view === "runtime" || opts.view === "operator"
         ? opts.runtimeLines
         : [
             ...opts.sessionLines,

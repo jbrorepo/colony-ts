@@ -137,6 +137,9 @@ import { buildChannelsCommandPayload } from "./gateway-channels";
 import { buildBrowserCommandPayload } from "./gateway-browser";
 import { buildSkillsCommandPayload } from "./gateway-skills";
 import { buildCapabilitiesCommandPayload } from "./gateway-capabilities";
+import { buildGitHubCommandPayload } from "./gateway-github";
+import { buildPluginsCommandPayload } from "./gateway-plugins";
+import { buildAuditCommandPayload } from "./gateway-audit";
 import {
   buildCancelCommandPayload,
   buildClearCommandPayload,
@@ -173,6 +176,7 @@ import {
   buildGatewayPerfSnapshot,
 } from "./gateway-events-snapshot";
 import { buildWorkflowCommandPayload } from "./gateway-workflow";
+import type { WorkflowRecipeRuntime } from "./workflow/recipes/executable-recipes";
 export {
   executeCommand,
   type CommandExecutionHandlers,
@@ -238,6 +242,9 @@ export class SlashCommandParser {
     this.register("browser", this.cmdBrowser);
     this.register("skills", this.cmdSkills);
     this.register("capabilities", this.cmdCapabilities);
+    this.register("github", this.cmdGitHub);
+    this.register("plugins", this.cmdPlugins);
+    this.register("audit", this.cmdAudit);
     this.register("cancel", this.cmdCancel);
     this.register("clear", this.cmdClear);
     this.register("resume", this.cmdResume);
@@ -322,6 +329,9 @@ export class SlashCommandParser {
   };
 
   private cmdStatus = (_args: string[], ctx: SlashCommandContext): CommandResult => {
+    if (_args[0]?.toLowerCase() === "operator") {
+      (ctx as Record<string, unknown>).statusView = "operator";
+    }
     const snapshot = buildGatewayStatusSnapshot(ctx);
     const payload = buildStatusCommandPayload({
       args: _args,
@@ -575,6 +585,7 @@ export class SlashCommandParser {
     const payload = buildWorkflowCommandPayload({
       args,
       runs: ctx.runtime?.workflowRuns ?? [],
+      recipeRuntime: (ctx.workflow as { recipeRuntime?: WorkflowRecipeRuntime } | undefined)?.recipeRuntime,
     });
     return result({
       command: "workflow",
@@ -754,6 +765,36 @@ export class SlashCommandParser {
     const payload = buildCapabilitiesCommandPayload(args);
     return result({
       command: "capabilities",
+      output: payload.output,
+      data: payload.data ?? {},
+      isError: payload.isError,
+    });
+  };
+
+  private cmdGitHub = (args: string[], ctx: SlashCommandContext): CommandResult => {
+    const payload = buildGitHubCommandPayload(args, ctx.github as Parameters<typeof buildGitHubCommandPayload>[1]);
+    return result({
+      command: "github",
+      output: payload.output,
+      data: payload.data ?? {},
+      isError: payload.isError,
+    });
+  };
+
+  private cmdPlugins = (args: string[], ctx: SlashCommandContext): CommandResult => {
+    const payload = buildPluginsCommandPayload(args, ctx.plugins as Parameters<typeof buildPluginsCommandPayload>[1]);
+    return result({
+      command: "plugins",
+      output: payload.output,
+      data: payload.data ?? {},
+      isError: payload.isError,
+    });
+  };
+
+  private cmdAudit = (args: string[], ctx: SlashCommandContext): CommandResult => {
+    const payload = buildAuditCommandPayload(args, ctx.audit as Parameters<typeof buildAuditCommandPayload>[1]);
+    return result({
+      command: "audit",
       output: payload.output,
       data: payload.data ?? {},
       isError: payload.isError,

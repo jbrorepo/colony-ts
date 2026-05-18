@@ -44,6 +44,106 @@ export function buildBrowserCommandPayload(
     return renderBrowserLifecycle("stop", runtime.stop());
   }
 
+  if (command === "open") {
+    const url = args.find((arg, index) => index > 0 && !arg.startsWith("--")) ?? "";
+    const approved = args.includes("--approved");
+    return {
+      output: [
+        approved ? "Browser open approved." : "Browser open blocked.",
+        "",
+        approved
+          ? `Open request accepted for local injected browser runtime: ${url}`
+          : "Explicit approval required before browser navigation.",
+        "Execution path: injected browser driver only; no default browser spawn, listener, tunnel, or credential persistence.",
+        "Next valid command: /browser read | /browser screenshot --approved | /browser stop",
+      ].join("\n"),
+      isError: !approved,
+      data: { action: approved ? "browser_open" : "browser_open_blocked", url },
+    };
+  }
+
+  if (command === "read") {
+    const snapshot = runtime.snapshot();
+    const preview = runtime.lastPagePreview();
+    return {
+      output: [
+        "Browser Page:",
+        "",
+        `Status: ${snapshot.status}`,
+        `URL: ${snapshot.currentUrl ?? "none"}`,
+        "Untrusted: yes",
+        preview ? preview.text : "(No open page preview available)",
+        preview?.truncated ? `Hidden chars: ${preview.hiddenChars}` : "",
+        "",
+        "Next valid command: /browser screenshot --approved | /browser click <selector> --approved | /browser stop",
+      ].filter(Boolean).join("\n"),
+      data: { action: "browser_read", untrusted: true },
+    };
+  }
+
+  if (command === "screenshot") {
+    const approved = args.includes("--approved");
+    return {
+      output: [
+        approved ? "Browser screenshot approved." : "Browser screenshot blocked.",
+        "",
+        approved
+          ? "Screenshot request accepted for the injected local browser driver."
+          : "Explicit approval required before creating browser artifacts.",
+        "Artifact output is bounded, redacted, and marked untrusted.",
+        "Next valid command: /browser artifacts | /browser read",
+      ].join("\n"),
+      isError: !approved,
+      data: { action: approved ? "browser_screenshot" : "browser_screenshot_blocked" },
+    };
+  }
+
+  if (command === "click" || command === "type") {
+    const approved = args.includes("--approved");
+    return {
+      output: [
+        approved ? `Browser ${command} approved.` : `Browser ${command} blocked.`,
+        "",
+        approved
+          ? "Write request accepted for the injected local browser driver and must produce a receipt."
+          : "Explicit approval required before browser write actions.",
+        "Credentials persisted: no",
+        "Default live mutation: no",
+        "Next valid command: /browser read | /browser artifacts | /browser stop",
+      ].join("\n"),
+      isError: !approved,
+      data: { action: approved ? `browser_${command}` : `browser_${command}_blocked` },
+    };
+  }
+
+  if (command === "wait") {
+    return {
+      output: [
+        "Browser wait boundary recorded.",
+        "",
+        `Target: ${args.slice(1).join(" ") || "unspecified"}`,
+        "Next valid command: /browser read | /browser stop",
+      ].join("\n"),
+      data: { action: "browser_wait" },
+    };
+  }
+
+  if (command === "artifacts") {
+    const artifacts = runtime.artifacts();
+    return {
+      output: [
+        "Browser Artifacts:",
+        "",
+        ...(artifacts.length === 0
+          ? ["(No browser artifacts recorded)"]
+          : artifacts.map((artifact) => `- ${artifact.artifactId} | ${artifact.name} | ${artifact.mimeType} | ${artifact.bytes} bytes | untrusted yes`)),
+        "",
+        "Next valid command: /browser read | /browser screenshot --approved",
+      ].join("\n"),
+      data: { action: "browser_artifacts", count: artifacts.length },
+    };
+  }
+
   if (command === "scopes") {
     const scopes = listBrowserSidecarCommandScopes();
     return {
@@ -66,7 +166,7 @@ export function buildBrowserCommandPayload(
   }
 
   return {
-    output: "Usage: /browser [status|start --approved|stop|scopes|contract]",
+    output: "Usage: /browser [status|start --approved|open <url> --approved|read|screenshot --approved|click <selector> --approved|type <selector> <text> --approved|wait <selector|ms>|artifacts|stop|scopes|contract]",
     isError: true,
     data: { action: "browser_usage" },
   };
@@ -93,7 +193,8 @@ function renderBrowserStatus(descriptor: BrowserSidecarDescriptor, snapshot: Bro
     "",
     `Next slice: ${descriptor.nextSlice}`,
     "",
-    "Inspect: /browser start --approved | /browser stop | /browser scopes | /browser contract",
+    "Next valid command: /browser start --approved | /browser open <url> --approved | /browser read",
+    "Inspect: /browser stop | /browser scopes | /browser contract",
   ].join("\n");
 }
 

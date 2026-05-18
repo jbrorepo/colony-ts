@@ -263,6 +263,34 @@ export function buildGatewayStatusSnapshot(
     budgetNeedsAttention: Boolean(budgetLines?.some((line) => line.startsWith("Action:"))),
   });
 
+  if ((ctx as Record<string, unknown>).statusView === "operator") {
+    runtimeLines = [
+      "Operator Dashboard:",
+      "",
+      `Runtime: ${runActive ? "active" : "idle"}`,
+      `Browser: ${ctx.browser?.runtime?.snapshot().status ?? "available"}`,
+      `Workflow: ${activeWorkflowCount(runtime?.workflowRuns ?? [])} active`,
+      `Plugins: ${Array.isArray((ctx.plugins as { entries?: unknown[] } | undefined)?.entries) ? (ctx.plugins as { entries?: unknown[] }).entries?.length ?? 0 : 0} trusted entries`,
+      `Approval state: ${ctx.approvals?.pending ? "pending" : "none"}`,
+      `Artifacts: inspect /artifact latest or /workflow artifacts <run_id>`,
+      `Cost/tokens: ${costSummary(tracker)}`,
+      "Blocked reason: none",
+      "Next valid command: /browser status | /workflow recipes | /plugins status | /audit status",
+    ];
+    return {
+      sessionLines,
+      savedLines,
+      runtimeLines,
+      sessionId: readString(session, ["sessionId", "session_id"]),
+      caste: readString(session, ["caste"]),
+      messageCount: messageCount(session),
+      contextUsage,
+      workspace: ctx.workspace ?? null,
+      provider: runtime?.provider ?? null,
+      model: runtime?.model ?? null,
+    };
+  }
+
   runtimeLines = renderStatusRuntimeSection({
     hasRuntime: Boolean(runtime),
     selectedProvider: runtime && (runtime.selectedProvider || runtime.selectedModel)

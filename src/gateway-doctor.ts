@@ -12,7 +12,10 @@ export type DoctorFilterMode =
   | "terminal"
   | "local"
   | "cloud"
-  | "first-run";
+  | "first-run"
+  | "setup"
+  | "demo"
+  | "release";
 
 export interface GatewayDoctorCheck {
   name?: string;
@@ -83,16 +86,19 @@ export function doctorFilterLabel(mode: DoctorFilterMode): string {
   if (mode === "local") return "local";
   if (mode === "cloud") return "cloud";
   if (mode === "first-run") return "first-run";
+  if (mode === "setup") return "setup";
+  if (mode === "demo") return "demo";
+  if (mode === "release") return "release";
   return "all";
 }
 
 export function doctorInspectViews(): string {
-  return "/doctor | /doctor errors | /doctor warnings | /doctor workspace | /doctor config | /doctor data | /doctor terminal | /doctor local | /doctor cloud | /doctor providers | /doctor failovers | /doctor first-run";
+  return "/doctor | /doctor errors | /doctor warnings | /doctor workspace | /doctor config | /doctor data | /doctor terminal | /doctor local | /doctor cloud | /doctor providers | /doctor failovers | /doctor first-run | /doctor setup | /doctor demo | /doctor release";
 }
 
 export function parseDoctorArgs(args: string[]): DoctorFilterSpec {
   const first = (args[0] ?? "").trim().toLowerCase();
-  if (["all", "failing", "errors", "warnings", "passed", "providers", "failovers", "workspace", "config", "data", "terminal", "local", "cloud", "first-run"].includes(first)) {
+  if (["all", "failing", "errors", "warnings", "passed", "providers", "failovers", "workspace", "config", "data", "terminal", "local", "cloud", "first-run", "setup", "demo", "release"].includes(first)) {
     return {
       mode: first as DoctorFilterMode,
       query: args.slice(1).join(" ").trim().toLowerCase(),
@@ -241,6 +247,9 @@ export function matchDoctorCheck(
   const modeMatches = (
     spec.mode === "all"
     || spec.mode === "first-run"
+    || spec.mode === "setup"
+    || spec.mode === "demo"
+    || spec.mode === "release"
     || (spec.mode === "failing" && !passed)
     || (spec.mode === "errors" && !passed && severity === "error")
     || (spec.mode === "warnings" && !passed && severity === "warning")
@@ -454,6 +463,30 @@ export function renderDoctorView(opts: {
   } else if (opts.failoverMode) {
     lines.push("");
     lines.push("Failover view: startup checks hidden; use failover history below.");
+  } else if (opts.mode === "setup") {
+    lines.push("");
+    lines.push("Guided Setup:");
+    lines.push("1. Install dependencies: bun install");
+    lines.push("2. Check providers: bun run alpha0:provider-check");
+    lines.push("3. Start local runtime: bun run start");
+    lines.push("4. Inspect: /doctor first-run | /provider | /workspace");
+    lines.push("Next valid command: /doctor demo");
+  } else if (opts.mode === "demo") {
+    lines.push("");
+    lines.push("Demo Path:");
+    lines.push("1. /browser status");
+    lines.push("2. /workflow recipes");
+    lines.push("3. /swarm llm \"prepare a concise launch checklist\"");
+    lines.push("4. /status operator");
+    lines.push("Next valid command: /doctor release");
+  } else if (opts.mode === "release") {
+    lines.push("");
+    lines.push("Release Readiness:");
+    lines.push("1. bun run verify:all");
+    lines.push("2. bun run release:gate");
+    lines.push("3. bun run verify:market-parity");
+    lines.push("4. bun run release:market-gate");
+    lines.push("Next valid command: /audit verify | /status operator");
   } else if (opts.firstRunMode) {
     lines.push(...opts.firstRunLines);
   } else if (opts.visibleChecks.length === 0) {

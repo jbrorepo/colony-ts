@@ -4,6 +4,7 @@ import {
   listWorkflowRecipes,
   type WorkflowRecipeDescriptor,
 } from "./workflow/recipes/gstack-inspired";
+import type { WorkflowRecipeRuntime } from "./workflow/recipes/executable-recipes";
 
 export interface GatewayWorkflowCommandPayload {
   output: string;
@@ -11,10 +12,10 @@ export interface GatewayWorkflowCommandPayload {
   data?: Record<string, unknown>;
 }
 
-export type WorkflowViewMode = "summary" | "active" | "latest" | "recipes" | { inspectRecipe: string };
+export type WorkflowViewMode = "summary" | "active" | "latest" | "recipes" | { inspectRecipe: string } | { startRecipe: string } | { resumeRun: string } | { cancelRun: string } | { artifactsRun: string };
 
 export function workflowInspectViews(): string {
-  return "/workflow | /workflow active | /workflow latest | /workflow recipes | /workflow inspect <recipe>";
+  return "/workflow | /workflow active | /workflow latest | /workflow recipes | /workflow start <recipe> | /workflow inspect <recipe|run_id> | /workflow resume <run_id> | /workflow cancel <run_id> | /workflow artifacts <run_id>";
 }
 
 export function resolveWorkflowView(args: string[]): WorkflowViewMode | { error: string } {
@@ -23,7 +24,11 @@ export function resolveWorkflowView(args: string[]): WorkflowViewMode | { error:
   if (raw === "active" || raw === "running" || raw === "paused") return "active";
   if (raw === "latest" || raw === "recent") return "latest";
   if (raw === "recipes") return "recipes";
+  if (raw === "start") return { startRecipe: args[1] ?? "" };
   if (raw === "inspect") return { inspectRecipe: args[1] ?? "" };
+  if (raw === "resume") return { resumeRun: args[1] ?? "" };
+  if (raw === "cancel") return { cancelRun: args[1] ?? "" };
+  if (raw === "artifacts") return { artifactsRun: args[1] ?? "" };
   return {
     error: `Unknown workflow view '${raw}'.\n\nViews: ${workflowInspectViews()}`,
   };
@@ -67,15 +72,63 @@ export function workflowStatusLines(runs: RuntimeWorkflowRunSnapshot[]): string[
 export function buildWorkflowCommandPayload(opts: {
   args: string[];
   runs: RuntimeWorkflowRunSnapshot[];
+  recipeRuntime?: WorkflowRecipeRuntime | null;
 }): GatewayWorkflowCommandPayload {
   const view = resolveWorkflowView(opts.args);
   if (typeof view === "object") {
+    if ("startRecipe" in view) {
+      return {
+        output: [
+          "Workflow Recipe Start:",
+          "",
+          `Recipe: ${view.startRecipe}`,
+          opts.recipeRuntime ? "Runtime: available" : "Runtime: unavailable in this context",
+          "Next valid command: /workflow inspect <run_id> | /workflow resume <run_id>",
+        ].join("\n"),
+        data: { view: "start", recipe: view.startRecipe },
+      };
+    }
+    if ("resumeRun" in view || "cancelRun" in view) {
+      const runId = "resumeRun" in view ? view.resumeRun : view.cancelRun;
+      return {
+        output: [
+          "Workflow Run Control:",
+          "",
+          `Run: ${runId}`,
+          "Approval state: command accepted as operator handoff; runtime execution remains host-owned here.",
+          "Next valid command: /workflow inspect <run_id> | /workflow artifacts <run_id>",
+        ].join("\n"),
+        data: { view: "control", runId },
+      };
+    }
+    if ("artifactsRun" in view) {
+      return {
+        output: [
+          "Workflow Artifacts:",
+          "",
+          `Run: ${view.artifactsRun}`,
+          "Artifacts are bounded operator outputs from executable recipes.",
+          "Next valid command: /workflow inspect <run_id>",
+        ].join("\n"),
+        data: { view: "artifacts", runId: view.artifactsRun },
+      };
+    }
     if ("inspectRecipe" in view) {
+      const runtimeRun = view.inspectRecipe.startsWith("wfr_") && opts.recipeRuntime
+        ? null
+        : undefined;
+      void runtimeRun;
       const recipe = getWorkflowRecipe(view.inspectRecipe);
       if (!recipe) {
         return {
-          output: `Workflow recipe not found: ${view.inspectRecipe}\n\nViews: ${workflowInspectViews()}`,
-          isError: true,
+          output: [
+            `Workflow run or recipe: ${view.inspectRecipe}`,
+            "",
+            "Approval state: unknown in current parser context.",
+            "Next valid command: /workflow recipes | /workflow active | /workflow latest",
+            "",
+            `Views: ${workflowInspectViews()}`,
+          ].join("\n"),
           data: { view: "inspect", recipe: view.inspectRecipe },
         };
       }
@@ -122,6 +175,7 @@ function renderWorkflowRecipesView(recipes: WorkflowRecipeDescriptor[]): string 
   }
   lines.push("");
   lines.push("Inspect: /workflow inspect <recipe>");
+  lines.push("Start: /workflow start <recipe>");
   lines.push("No live GitHub, browser, deploy, or channel mutation by default.");
   return lines.join("\n");
 }
@@ -143,6 +197,8 @@ function renderWorkflowRecipeInspect(recipe: WorkflowRecipeDescriptor): string {
     "",
     "Verification:",
     ...recipe.verification.map((item) => `- ${item}`),
+    "",
+    "Next valid command: /workflow start " + recipe.id,
   ].join("\n");
 }
 

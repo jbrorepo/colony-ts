@@ -73,6 +73,10 @@ Optional recovery commands:
 | Skills | Generated skill documentation and trace-to-skill output are preview/proposal artifacts | No generated `SKILL.md` is promoted or written by preview/proposal views |
 | Workflows | Workflow recipes are descriptor-first | No live GitHub, browser, deploy, or channel mutation by default |
 | Plugins | Local plugin activation preflight is host-owned | No default live browser tunnel, plugin activation, registry fetch, channel delivery, or credential persistence is shipped. |
+| Browser automation | Browser automation remains local-first and approval-gated | Navigation, screenshot, click, type, and artifacts require injected local runtime boundaries and bounded untrusted output |
+| GitHub PRs | GitHub PR creation requires explicit push and PR approvals | Remote mutation uses injected executors and redacted receipts; credentials are not persisted |
+| Trusted plugins | Trusted plugin activation requires local descriptor preflight | No registry fetch, package-code execution, or default plugin execution is part of trusted local activation |
+| Executable recipes | Executable workflow recipes pause before risky host actions | Recipes emit bounded artifacts and next-action truth before external mutation |
 | Channels | Experimental host-owned foundations | No channel adapter is presented as default alpha delivery |
 
 ## Release Checklist

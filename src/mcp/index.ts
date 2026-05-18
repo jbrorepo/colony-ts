@@ -55,5 +55,6 @@ export * from "./plugin-package-marketplace-lifecycle-default-ux-command-panel-d
 export * from "./plugin-package-marketplace-lifecycle-default-ux-command-panel-digest-clipboard-review-closeout";
 export * from "./plugin-package-marketplace-lifecycle-default-ux-command-panel-digest-clipboard-review-closeout-summary";
 export * from "./plugin-local-activation-preflight";
+export * from "./trusted-local-plugin-activation";
 export * from "./client";
 export * from "./result-validation";
