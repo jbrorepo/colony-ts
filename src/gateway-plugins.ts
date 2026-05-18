@@ -5,6 +5,7 @@ import {
   type TrustedLocalPluginEntry,
   type TrustedPluginActivationReceipt,
 } from "./mcp/trusted-local-plugin-activation";
+import { scrubSecrets } from "./security/log-sanitizer";
 
 export interface GatewayPluginsContext {
   entries?: TrustedLocalPluginEntry[];
@@ -27,17 +28,22 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
     };
   }
   if (command === "preflight") {
-    const id = args[1] ?? "";
-    const entry = entries.find((candidate) => candidate.id === id) ?? { id, source: "installed" as const, installed: false, trusted: false };
+    const id = requiredPluginId(args[1]);
+    if (!id) return missingPluginId("/plugins preflight <id>");
+    if (!id.ok) return rejectedPluginId("/plugins preflight <id>");
+    const entry = entries.find((candidate) => candidate.id === id.value) ?? { id: id.value, source: "installed" as const, installed: false, trusted: false };
     const preflight = buildTrustedPluginPreflight(entry);
     return {
       output: renderTrustedPluginPreflight(preflight),
       isError: !preflight.ready,
-      data: { action: "plugins_preflight", pluginId: id, ready: preflight.ready },
+      data: { action: "plugins_preflight", pluginId: id.value, ready: preflight.ready },
     };
   }
   if (command === "activate" || command === "deactivate") {
-    const id = args[1] ?? "";
+    const id = requiredPluginId(args[1]);
+    const retryCommand = `/plugins ${command} <id> --approved`;
+    if (!id) return missingPluginId(retryCommand);
+    if (!id.ok) return rejectedPluginId(retryCommand);
     const approved = args.includes("--approved");
     return {
       output: [
@@ -53,11 +59,11 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
         "Next valid command: /plugins status",
       ].join("\n"),
       isError: !approved,
-      data: { action: `plugins_${command}`, pluginId: id, approved },
+      data: { action: `plugins_${command}`, pluginId: id.value, approved },
       action: approved
         ? command === "activate"
-          ? { kind: "plugin_activate", pluginId: id, approved: true }
-          : { kind: "plugin_deactivate", pluginId: id, approved: true }
+          ? { kind: "plugin_activate", pluginId: id.value, approved: true }
+          : { kind: "plugin_deactivate", pluginId: id.value, approved: true }
         : { kind: "display" },
     };
   }
@@ -78,4 +84,47 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
 
 function yesNo(value: boolean): string {
   return value ? "yes" : "no";
+}
+
+type PluginIdValidation = { ok: true; value: string } | { ok: false };
+
+function requiredPluginId(value: string | undefined): PluginIdValidation | null {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return null;
+  const scrubbed = scrubPluginId(raw);
+  if (scrubbed.includes("[REDACTED]")) return { ok: false };
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(scrubbed)) return { ok: false };
+  if (scrubbed.includes("..") || scrubbed.includes("@{")) return { ok: false };
+  return { ok: true, value: scrubbed };
+}
+
+function missingPluginId(command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Plugin id required.",
+      "",
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "plugins_missing_id" },
+  };
+}
+
+function rejectedPluginId(command: string): GatewayBasicCommandPayload {
+  return {
+    output: [
+      "Plugin id rejected.",
+      "",
+      "Plugin identifiers must be local descriptor ids, not paths, shell text, or credentials.",
+      `Next valid command: ${command}`,
+    ].join("\n"),
+    isError: true,
+    data: { action: "plugins_rejected_id" },
+  };
+}
+
+function scrubPluginId(value: string): string {
+  return scrubSecrets(value)
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
 }
