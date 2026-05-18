@@ -592,6 +592,7 @@ export class SlashCommandParser {
       output: payload.output,
       data: payload.data ?? {},
       isError: payload.isError,
+      action: payload.action as CommandAction | undefined,
     });
   };
 
@@ -744,6 +745,7 @@ export class SlashCommandParser {
       output: payload.output,
       data: payload.data ?? {},
       isError: payload.isError,
+      action: payload.action as CommandAction | undefined,
     });
   };
 
@@ -778,6 +780,7 @@ export class SlashCommandParser {
       output: payload.output,
       data: payload.data ?? {},
       isError: payload.isError,
+      action: payload.action as CommandAction | undefined,
     });
   };
 
@@ -788,6 +791,7 @@ export class SlashCommandParser {
       output: payload.output,
       data: payload.data ?? {},
       isError: payload.isError,
+      action: payload.action as CommandAction | undefined,
     });
   };
 

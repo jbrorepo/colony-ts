@@ -58,6 +58,7 @@ export function buildGitHubCommandPayload(args: string[], context: GatewayGitHub
       ].join("\n"),
       isError: !approved,
       data: { action: approved ? "github_pr_create" : "github_pr_create_blocked" },
+      action: approved ? { kind: "github_pr_create", runId: args[2] ?? "", approved: true } : { kind: "display" },
     };
   }
   if (scope === "pr" && action === "status") {

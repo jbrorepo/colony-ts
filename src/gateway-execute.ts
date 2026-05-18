@@ -427,6 +427,20 @@ export async function executeCommand(
       }
       return true;
 
+    case "browser_open":
+    case "browser_screenshot":
+    case "browser_click":
+    case "browser_type":
+    case "browser_wait":
+    case "start_workflow_recipe":
+    case "resume_workflow_recipe":
+    case "cancel_workflow_recipe":
+    case "github_pr_create":
+    case "plugin_activate":
+    case "plugin_deactivate":
+      handlers.showSystemMessage(command.output);
+      return true;
+
     case "show_artifact": {
       handlers.showSystemMessage(command.output);
       const artifact = handlers.showArtifact

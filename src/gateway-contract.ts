@@ -27,6 +27,17 @@ export type CommandAction =
   | { kind: "cancel_swarm"; runId: string }
   | { kind: "resume_swarm"; runId: string }
   | { kind: "retry_swarm_stage"; runId: string; stage: SwarmStage }
+  | { kind: "browser_open"; url: string; approved: true }
+  | { kind: "browser_screenshot"; approved: true }
+  | { kind: "browser_click"; selector: string; approved: true }
+  | { kind: "browser_type"; selector: string; text: string; approved: true }
+  | { kind: "browser_wait"; target: string }
+  | { kind: "start_workflow_recipe"; recipeId: string }
+  | { kind: "resume_workflow_recipe"; runId: string }
+  | { kind: "cancel_workflow_recipe"; runId: string }
+  | { kind: "github_pr_create"; runId: string; approved: true }
+  | { kind: "plugin_activate"; pluginId: string; approved: true }
+  | { kind: "plugin_deactivate"; pluginId: string; approved: true }
   | { kind: "show_artifact"; filepath: string }
   | { kind: "show_artifact_catalog"; sessionId: string; latest?: boolean }
   | { kind: "set_budget"; maxUsd: number }

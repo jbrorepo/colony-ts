@@ -10,6 +10,7 @@ export interface GatewayWorkflowCommandPayload {
   output: string;
   isError?: boolean;
   data?: Record<string, unknown>;
+  action?: Record<string, unknown>;
 }
 
 export type WorkflowViewMode = "summary" | "active" | "latest" | "recipes" | { inspectRecipe: string } | { startRecipe: string } | { resumeRun: string } | { cancelRun: string } | { artifactsRun: string };
@@ -86,10 +87,12 @@ export function buildWorkflowCommandPayload(opts: {
           "Next valid command: /workflow inspect <run_id> | /workflow resume <run_id>",
         ].join("\n"),
         data: { view: "start", recipe: view.startRecipe },
+        action: { kind: "start_workflow_recipe", recipeId: view.startRecipe },
       };
     }
     if ("resumeRun" in view || "cancelRun" in view) {
       const runId = "resumeRun" in view ? view.resumeRun : view.cancelRun;
+      const actionKind = "resumeRun" in view ? "resume_workflow_recipe" : "cancel_workflow_recipe";
       return {
         output: [
           "Workflow Run Control:",
@@ -99,6 +102,7 @@ export function buildWorkflowCommandPayload(opts: {
           "Next valid command: /workflow inspect <run_id> | /workflow artifacts <run_id>",
         ].join("\n"),
         data: { view: "control", runId },
+        action: { kind: actionKind, runId },
       };
     }
     if ("artifactsRun" in view) {

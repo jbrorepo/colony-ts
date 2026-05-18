@@ -59,6 +59,7 @@ export function buildBrowserCommandPayload(
       ].join("\n"),
       isError: !approved,
       data: { action: approved ? "browser_open" : "browser_open_blocked", url },
+      action: approved ? { kind: "browser_open", url, approved: true } : { kind: "display" },
     };
   }
 
@@ -95,6 +96,7 @@ export function buildBrowserCommandPayload(
       ].join("\n"),
       isError: !approved,
       data: { action: approved ? "browser_screenshot" : "browser_screenshot_blocked" },
+      action: approved ? { kind: "browser_screenshot", approved: true } : { kind: "display" },
     };
   }
 
@@ -113,6 +115,11 @@ export function buildBrowserCommandPayload(
       ].join("\n"),
       isError: !approved,
       data: { action: approved ? `browser_${command}` : `browser_${command}_blocked` },
+      action: approved
+        ? command === "click"
+          ? { kind: "browser_click", selector: args[1] ?? "", approved: true }
+          : { kind: "browser_type", selector: args[1] ?? "", text: args.slice(2).filter((arg) => arg !== "--approved").join(" "), approved: true }
+        : { kind: "display" },
     };
   }
 
@@ -125,6 +132,7 @@ export function buildBrowserCommandPayload(
         "Next valid command: /browser read | /browser stop",
       ].join("\n"),
       data: { action: "browser_wait" },
+      action: { kind: "browser_wait", target: args.slice(1).join(" ") || "unspecified" },
     };
   }
 

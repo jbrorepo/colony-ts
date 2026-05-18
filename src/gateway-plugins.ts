@@ -54,6 +54,11 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
       ].join("\n"),
       isError: !approved,
       data: { action: `plugins_${command}`, pluginId: id, approved },
+      action: approved
+        ? command === "activate"
+          ? { kind: "plugin_activate", pluginId: id, approved: true }
+          : { kind: "plugin_deactivate", pluginId: id, approved: true }
+        : { kind: "display" },
     };
   }
   const receipts = context.receipts ?? [];
