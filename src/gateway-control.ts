@@ -130,12 +130,13 @@ export function buildModelCommandPayload(opts: {
     };
   }
 
-  const verb = opts.args[0]?.trim().toLowerCase();
+  const verb = normalizeModelCommandToken(opts.args[0]);
+  const explicitSelectionVerb = verb === "use" || verb === "set" || verb === "select";
   const selectionArgs = verb === "use" || verb === "set" || verb === "select"
-    ? opts.args.slice(1)
-    : opts.args;
+    ? normalizeModelSelectionArgs(opts.args.slice(1))
+    : normalizeModelSelectionArgs(opts.args);
 
-  if (selectionArgs.length === 0) {
+  if (selectionArgs.length === 0 && !explicitSelectionVerb) {
     const selectedProvider = runtime.selectedProvider ?? runtime.provider ?? "unknown";
     const selectedModel = runtime.selectedModel ?? runtime.model ?? "unknown";
     const currentProvider = runtime.provider ?? "unknown";
@@ -155,6 +156,12 @@ export function buildModelCommandPayload(opts: {
       },
     };
   }
+  if (selectionArgs.length === 0) {
+    return {
+      output: "Model name required.\n\nNext valid command: /model <model> | /model <provider> <model>",
+      isError: true,
+    };
+  }
 
   let provider = opts.normalizeProviderAlias(runtime.selectedProvider ?? runtime.provider ?? "");
   let model = "";
@@ -172,6 +179,19 @@ export function buildModelCommandPayload(opts: {
     provider = resolvedProvider.provider;
     model = selectionArgs.slice(1).join(" ").trim();
   }
+  const modelName = validateModelSelectionName(model);
+  if (!modelName.ok) {
+    return {
+      output: [
+        "Model name rejected.",
+        "",
+        "Model names must be model identifiers, not flags or credentials.",
+        "Next valid command: /model <model> | /model <provider> <model>",
+      ].join("\n"),
+      isError: true,
+    };
+  }
+  model = modelName.value;
 
   if (!provider) {
     return {
@@ -198,6 +218,31 @@ export function buildModelCommandPayload(opts: {
     data: { provider, model },
     action: { kind: "set_provider", provider, model },
   };
+}
+
+function normalizeModelCommandToken(value: string | undefined): string {
+  const raw = value?.trim() ?? "";
+  if (!raw || raw.startsWith("--")) return "";
+  const redacted = redactModelSelectionInput(raw);
+  return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
+}
+
+function normalizeModelSelectionArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.trim().startsWith("--"));
+}
+
+function validateModelSelectionName(value: string): { ok: true; value: string } | { ok: false } {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith("--")) return { ok: false };
+  const redacted = redactModelSelectionInput(trimmed);
+  if (redacted.includes("[REDACTED]")) return { ok: false };
+  return { ok: true, value: redacted };
+}
+
+function redactModelSelectionInput(value: string): string {
+  return scrubSecrets(value.trim())
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
 }
 
 export function memoryInspectViews(): string {
