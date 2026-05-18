@@ -94,7 +94,7 @@ export function buildBrowserCommandPayload(
     if (!rawUrl) return missingBrowserArgument("Browser URL", "/browser open <url> --approved");
     const policy = validateBrowserAutomationUrl(rawUrl);
     if (!policy.ok) return rejectedBrowserArgument(policy.reason, "/browser open <url> --approved");
-    const url = displayBrowserUrl(policy.url);
+    const url = redactBrowserSurfaceText(displayBrowserUrl(policy.url));
     const approved = args.includes("--approved");
     return {
       output: [
@@ -120,7 +120,7 @@ export function buildBrowserCommandPayload(
         "Browser Page:",
         "",
         `Status: ${snapshot.status}`,
-        `URL: ${snapshot.currentUrl ?? "none"}`,
+        `URL: ${redactBrowserSurfaceText(snapshot.currentUrl ?? "none")}`,
         "Untrusted: yes",
         preview ? preview.text : "(No open page preview available)",
         preview?.truncated ? `Hidden chars: ${preview.hiddenChars}` : "",
@@ -183,7 +183,7 @@ export function buildBrowserCommandPayload(
       output: [
         "Browser wait boundary recorded.",
         "",
-        `Target: ${target}`,
+        `Target: ${redactBrowserSurfaceText(target)}`,
         "Next valid command: /browser read | /browser stop",
       ].join("\n"),
       data: { action: "browser_wait" },
@@ -199,7 +199,7 @@ export function buildBrowserCommandPayload(
         "",
         ...(artifacts.length === 0
           ? ["(No browser artifacts recorded)"]
-          : artifacts.map((artifact) => `- ${artifact.artifactId} | ${artifact.name} | ${artifact.mimeType} | ${artifact.bytes} bytes | untrusted yes`)),
+          : artifacts.map((artifact) => `- ${redactBrowserSurfaceText(artifact.artifactId)} | ${redactBrowserSurfaceText(artifact.name)} | ${redactBrowserSurfaceText(artifact.mimeType)} | ${artifact.bytes} bytes | untrusted yes`)),
         "",
         "Next valid command: /browser read | /browser screenshot --approved",
       ].join("\n"),
@@ -338,4 +338,10 @@ function displayBrowserUrl(url: string): string {
     return url;
   }
   return url;
+}
+
+function redactBrowserSurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }

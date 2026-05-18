@@ -311,6 +311,8 @@ export function redactAndBoundBrowserPageOutput(
 ): BrowserPageOutputPreview {
   const maxChars = Math.max(40, options.maxChars ?? 4_000);
   const redacted = String(text ?? "")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]+\b/g, "[REDACTED]")
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[REDACTED_SECRET]")
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[REDACTED_EMAIL]");
   const preview = redacted.slice(0, maxChars);
