@@ -227,6 +227,8 @@ export interface CommandExecutionHandlers {
   requestExternalChannelRegistration?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   requestExternalChannelWebhookRegistration?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   requestExternalChannelSubscriptionSetup?: (channelId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestBrowserStart?: () => Promise<string | CommandResult | void> | string | CommandResult | void;
+  requestBrowserStop?: () => Promise<string | CommandResult | void> | string | CommandResult | void;
   requestBrowserOpen?: (url: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   requestBrowserScreenshot?: () => Promise<string | CommandResult | void> | string | CommandResult | void;
   requestBrowserClick?: (selector: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
@@ -449,6 +451,16 @@ export async function executeCommand(
           `Failed to request external channel subscription setup for ${action.channelId}: host handler failed. Inspect host-owned logs for details.`,
         );
       }
+      return true;
+
+    case "browser_start":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Browser start", handlers.requestBrowserStart, handlers);
+      return true;
+
+    case "browser_stop":
+      handlers.showSystemMessage(command.output);
+      await runOptionalHandoff("Browser stop", handlers.requestBrowserStop, handlers);
       return true;
 
     case "browser_open":

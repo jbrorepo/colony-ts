@@ -27,6 +27,8 @@ export type CommandAction =
   | { kind: "cancel_swarm"; runId: string }
   | { kind: "resume_swarm"; runId: string }
   | { kind: "retry_swarm_stage"; runId: string; stage: SwarmStage }
+  | { kind: "browser_start"; approved: true }
+  | { kind: "browser_stop" }
   | { kind: "browser_open"; url: string; approved: true }
   | { kind: "browser_screenshot"; approved: true }
   | { kind: "browser_click"; selector: string; approved: true }

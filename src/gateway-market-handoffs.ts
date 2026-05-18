@@ -20,12 +20,37 @@ export function createBrowserExecutionHandlers(
 ): Pick<
   CommandExecutionHandlers,
   | "requestBrowserOpen"
+  | "requestBrowserStart"
+  | "requestBrowserStop"
   | "requestBrowserScreenshot"
   | "requestBrowserClick"
   | "requestBrowserType"
   | "requestBrowserWait"
 > {
   return {
+    requestBrowserStart: async () => {
+      const result = runtime.start(HANDOFF_APPROVAL);
+      if (result.status === "blocked") return renderBrowserBlocked("start", result.reason);
+      return [
+        "Browser runtime started.",
+        `Status: ${result.snapshot.status}`,
+        `No listener bound: ${result.snapshot.listenerBound ? "no" : "yes"}`,
+        `No browser spawned: ${result.snapshot.browserSpawned ? "no" : "yes"}`,
+        `No credentials persisted: ${result.snapshot.credentialsPersisted ? "no" : "yes"}`,
+        `No tunnel active: ${result.snapshot.tunnelActive ? "no" : "yes"}`,
+      ].join("\n");
+    },
+    requestBrowserStop: async () => {
+      const result = runtime.stop();
+      return [
+        "Browser runtime stopped.",
+        `Status: ${result.snapshot.status}`,
+        `No listener bound: ${result.snapshot.listenerBound ? "no" : "yes"}`,
+        `No browser spawned: ${result.snapshot.browserSpawned ? "no" : "yes"}`,
+        `No credentials persisted: ${result.snapshot.credentialsPersisted ? "no" : "yes"}`,
+        `No tunnel active: ${result.snapshot.tunnelActive ? "no" : "yes"}`,
+      ].join("\n");
+    },
     requestBrowserOpen: async (url) => {
       const result = await runtime.open(url, HANDOFF_APPROVAL);
       if (result.status === "blocked") return renderBrowserBlocked("open", result.reason);
