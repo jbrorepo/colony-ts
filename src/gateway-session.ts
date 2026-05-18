@@ -108,6 +108,13 @@ function normalizeSessionQueryArgs(args: string[]): string[] {
   return args.filter((arg) => !arg.trim().startsWith("--"));
 }
 
+function normalizeSessionReferenceInput(value: string): string {
+  const reference = normalizeSessionQueryArgs(value.split(/\s+/))
+    .join(" ")
+    .trim();
+  return reference ? redactSessionQuery(reference) : "";
+}
+
 export function interruptionLabel(state?: string): string {
   if (state === "interrupted_prompt") return "awaiting reply";
   if (state === "interrupted_turn") return "tool turn interrupted";
@@ -166,7 +173,7 @@ export function normalizeHistoryCount(
 ): { reference: string | null; count: number; filter: HistoryFilterMode | null; search: string | null } {
   if (args.length === 0) return { reference: null, count: 8, filter: null, search: null };
 
-  const tokens = args.map((arg) => arg.trim()).filter(Boolean);
+  const tokens = normalizeSessionQueryArgs(args).map((arg) => arg.trim()).filter(Boolean);
   const maybeCount = parsePositiveInteger(tokens.at(-1) ?? "");
   const count = maybeCount ?? 8;
   const referenceTokens = maybeCount !== null ? tokens.slice(0, -1) : [...tokens];
@@ -181,14 +188,15 @@ export function normalizeHistoryCount(
     return normalized === "search" || normalized === "query";
   });
   const search = searchIndex >= 0
-    ? referenceTokens.splice(searchIndex + 1).join(" ").trim() || null
+    ? redactSessionQuery(referenceTokens.splice(searchIndex + 1).join(" ").trim()) || null
     : null;
   if (searchIndex >= 0) {
     referenceTokens.splice(searchIndex, 1);
   }
 
+  const reference = referenceTokens.join(" ").trim();
   return {
-    reference: referenceTokens.join(" ").trim() || null,
+    reference: reference ? redactSessionQuery(reference) : null,
     count,
     filter,
     search,
@@ -915,8 +923,9 @@ export function buildArtifactCommandPayload(opts: {
   sessionId: string;
   resolveArtifactPath: (rawPath: string) => { filepath?: string; error?: string };
 }): GatewaySessionCommandPayload {
-  const verb = opts.args[0]?.trim().toLowerCase();
-  if (opts.args.length === 0 || verb === "list" || verb === "recent") {
+  const args = normalizeSessionQueryArgs(opts.args);
+  const verb = normalizeSessionQuery(args[0] ?? "");
+  if (args.length === 0 || verb === "list" || verb === "recent") {
     if (!opts.sessionId) {
       return {
         output: renderArtifactNoSession(),
@@ -944,7 +953,15 @@ export function buildArtifactCommandPayload(opts: {
     };
   }
 
-  const target = opts.resolveArtifactPath(opts.args.join(" "));
+  const rawPath = redactSessionQuery(args.join(" ").trim());
+  if (rawPath.includes("[REDACTED]")) {
+    return {
+      output: "Artifact path rejected.\n\nUse /artifact to list recent saved outputs or /artifact latest to open the newest one.",
+      isError: true,
+    };
+  }
+
+  const target = opts.resolveArtifactPath(rawPath);
   if (target.error || !target.filepath) {
     return {
       output: `${target.error ?? "Usage: /artifact <saved_tool_result_path>"}\n\nUse /artifact to list recent saved outputs or /artifact latest to open the newest one.`,
@@ -971,11 +988,13 @@ export function buildHistoryCommandPayload(opts: {
   latestCurrentExcerpt: SessionHistoryExcerpt | null;
   latestSessionId: string | null;
 }): GatewaySessionCommandPayload {
-  const normalizedRef = (opts.reference ?? "").trim().toLowerCase();
+  const reference = opts.reference ? redactSessionQuery(opts.reference) : null;
+  const search = opts.search ? redactSessionQuery(opts.search) : null;
+  const normalizedRef = (reference ?? "").trim().toLowerCase();
   const newestInterruptedSessionId =
     opts.sessions.find((item) => String(item.interruption ?? "none") !== "none")?.sessionId ?? null;
 
-  if (!opts.reference || normalizedRef === "current") {
+  if (!reference || normalizedRef === "current") {
     if (!opts.currentExcerpt) {
       return {
         output: opts.sessions.length > 0
@@ -988,7 +1007,7 @@ export function buildHistoryCommandPayload(opts: {
       excerpt: opts.currentExcerpt,
       count: opts.count,
       filter: opts.filter,
-      search: opts.search,
+      search,
       historyAliases: opts.currentHistoryAliases,
     });
   }
@@ -1003,7 +1022,7 @@ export function buildHistoryCommandPayload(opts: {
       excerpt: opts.currentExcerpt,
       count: opts.count,
       filter: opts.filter,
-      search: opts.search,
+      search,
       historyAliases: opts.currentHistoryAliases,
       reference: normalizedRef,
     });
@@ -1014,13 +1033,13 @@ export function buildHistoryCommandPayload(opts: {
       excerpt: opts.latestCurrentExcerpt,
       count: opts.count,
       filter: opts.filter,
-      search: opts.search,
+      search,
       historyAliases: opts.currentHistoryAliases,
       reference: normalizedRef,
     });
   }
 
-  const resolved = resolveResumeTarget(opts.reference, opts.sessions);
+  const resolved = resolveResumeTarget(reference, opts.sessions);
   if ("error" in resolved) {
     return {
       output: resolved.error,
@@ -1033,7 +1052,7 @@ export function buildHistoryCommandPayload(opts: {
       excerpt: opts.currentExcerpt,
       count: opts.count,
       filter: opts.filter,
-      search: opts.search,
+      search,
       historyAliases: opts.currentHistoryAliases,
       reference: resolved.displayRef,
     });
@@ -1046,14 +1065,14 @@ export function buildHistoryCommandPayload(opts: {
       count: opts.count,
       reference: resolved.displayRef,
       filter: opts.filter,
-      search: opts.search,
+      search,
     },
     action: {
       kind: "show_session_history",
       sessionId: resolved.sessionId,
       count: opts.count,
       historyFilter: opts.filter,
-      historySearch: opts.search,
+      historySearch: search,
       resumeAliases: sessionShortcutAliases(
         resolved.sessionId,
         newestInterruptedSessionId ? String(newestInterruptedSessionId) : null,
@@ -1073,14 +1092,15 @@ export function buildResumeCommandPayload(opts: {
   latestCurrentSessionId?: string | null;
   latestSessionId: string | null;
 }): GatewaySessionCommandPayload {
-  if (!opts.reference) {
+  const reference = normalizeSessionReferenceInput(opts.reference);
+  if (!reference) {
     return {
       output: "Usage: /resume <session_id|prefix|index|latest|pending>\n\nUse /sessions to list resumable sessions, then resume by full ID, unique prefix, numeric index, 'latest', or the newest interrupted session via 'pending'.",
       isError: true,
     };
   }
 
-  const normalizedReference = opts.reference.trim().toLowerCase();
+  const normalizedReference = reference.trim().toLowerCase();
   const newestInterruptedSessionId =
     opts.sessions.find((session) => String(session.interruption ?? "none") !== "none")?.sessionId ?? null;
   if (
@@ -1127,7 +1147,7 @@ export function buildResumeCommandPayload(opts: {
     };
   }
 
-  const resolved = resolveResumeTarget(opts.reference, opts.sessions);
+  const resolved = resolveResumeTarget(reference, opts.sessions);
   if ("error" in resolved) {
     return {
       output: resolved.error,
