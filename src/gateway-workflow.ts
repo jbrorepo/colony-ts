@@ -4,8 +4,10 @@ import {
   listWorkflowRecipes,
   type WorkflowRecipeDescriptor,
 } from "./workflow/recipes/gstack-inspired";
-import type { WorkflowRecipeRuntime } from "./workflow/recipes/executable-recipes";
-import type { WorkflowRecipeRuntimeSnapshot } from "./workflow/recipes/executable-recipes";
+import type {
+  WorkflowRecipeRuntime,
+  WorkflowRecipeRuntimeSnapshot,
+} from "./workflow/recipes/executable-recipes";
 
 export interface GatewayWorkflowCommandPayload {
   output: string;
@@ -158,7 +160,8 @@ export function buildWorkflowCommandPayload(opts: {
     };
   }
 
-  const runs = [...opts.runs].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const runs = collectWorkflowRuns(opts.runs, opts.recipeRuntime)
+    .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
   if (view === "recipes") {
     const recipes = listWorkflowRecipes();
     return {
@@ -180,6 +183,36 @@ export function buildWorkflowCommandPayload(opts: {
   return {
     output: renderWorkflowSummaryView(selectedRuns, runs.length, view),
     data: { view, count: selectedRuns.length, total: runs.length },
+  };
+}
+
+function collectWorkflowRuns(
+  runs: RuntimeWorkflowRunSnapshot[],
+  recipeRuntime?: WorkflowRecipeRuntime | null,
+): RuntimeWorkflowRunSnapshot[] {
+  const byId = new Map<string, RuntimeWorkflowRunSnapshot>();
+  for (const run of runs) {
+    byId.set(run.runId, { ...run });
+  }
+  for (const snapshot of recipeRuntime?.listCached() ?? []) {
+    byId.set(snapshot.runId, workflowRecipeSnapshotToRuntimeRun(snapshot));
+  }
+  return [...byId.values()];
+}
+
+function workflowRecipeSnapshotToRuntimeRun(snapshot: WorkflowRecipeRuntimeSnapshot): RuntimeWorkflowRunSnapshot {
+  return {
+    runId: snapshot.runId,
+    definitionId: `recipe_${snapshot.recipeId}`,
+    title: snapshot.title,
+    status: snapshot.status,
+    completedSteps: snapshot.completedSteps,
+    totalSteps: snapshot.totalSteps,
+    awaitingStepId: snapshot.awaitingStepId,
+    failedStepId: snapshot.failedStepId,
+    artifactCount: snapshot.artifactCount,
+    checkpointCount: snapshot.checkpointCount,
+    updatedAt: snapshot.updatedAt,
   };
 }
 
@@ -266,6 +299,7 @@ function renderWorkflowSummaryView(
       lines.push(`- ${workflowProgressLine(run)}`);
       if (run.awaitingStepId) lines.push(`  Awaiting: ${run.awaitingStepId}`);
       if (run.failedStepId) lines.push(`  Failed step: ${run.failedStepId}`);
+      lines.push(`  Inspect: /workflow inspect ${run.runId}`);
     }
   }
   lines.push("");
