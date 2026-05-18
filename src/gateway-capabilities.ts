@@ -40,7 +40,7 @@ export function buildCapabilitiesCommandPayload(args: string[]): GatewayBasicCom
     const capability = getGstackInspiredCapability(id.value);
     if (!capability) {
       return {
-        output: `Capability not found: ${id.value}\n\nInspect: /capabilities | /capabilities next`,
+        output: `Capability not found: ${redactCapabilitySurfaceText(id.value)}\n\nInspect: /capabilities | /capabilities next`,
         isError: true,
         data: {
           action: "capabilities_missing",
@@ -70,9 +70,7 @@ function normalizeCapabilitiesCommandArgs(args: string[]): string[] {
 }
 
 function normalizeCapabilitiesCommandInput(value: string): string {
-  const redacted = scrubSecrets(value.trim())
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  const redacted = redactCapabilitySurfaceText(value);
   return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
@@ -81,9 +79,11 @@ type CapabilityIdValidation = { ok: true; value: string } | { ok: false };
 function requiredCapabilityId(value: string | undefined): CapabilityIdValidation | null {
   const raw = value?.trim() ?? "";
   if (!raw || raw.startsWith("--")) return null;
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(raw)) return { ok: false };
-  if (raw.includes("..") || raw.includes("@{")) return { ok: false };
-  return { ok: true, value: raw };
+  const redacted = redactCapabilitySurfaceText(raw);
+  if (redacted.includes("[REDACTED]")) return { ok: false };
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(redacted)) return { ok: false };
+  if (redacted.includes("..") || redacted.includes("@{")) return { ok: false };
+  return { ok: true, value: redacted };
 }
 
 function missingCapabilityId(): GatewayBasicCommandPayload {
@@ -114,8 +114,8 @@ function rejectedCapabilityId(): GatewayBasicCommandPayload {
 function renderCapabilitiesList(capabilities: GstackInspiredCapability[]): string {
   const lines = ["GStack-Inspired Colony Capabilities:", ""];
   for (const capability of capabilities) {
-    lines.push(`- ${capability.id} | ${capability.status} | ${capability.title}`);
-    lines.push(`  Next: ${capability.nextSlice}`);
+    lines.push(`- ${redactCapabilitySurfaceText(capability.id)} | ${redactCapabilitySurfaceText(capability.status)} | ${redactCapabilitySurfaceText(capability.title)}`);
+    lines.push(`  Next: ${redactCapabilitySurfaceText(capability.nextSlice)}`);
   }
   lines.push("");
   lines.push("Inspect: /capabilities inspect <id> | /capabilities next");
@@ -135,40 +135,46 @@ function renderNextCapability(capability: GstackInspiredCapability | null): stri
   return [
     "Next Capability Slice:",
     "",
-    `${capability.id} | ${capability.status} | ${capability.title}`,
+    `${redactCapabilitySurfaceText(capability.id)} | ${redactCapabilitySurfaceText(capability.status)} | ${redactCapabilitySurfaceText(capability.title)}`,
     "",
-    capability.nextSlice,
+    redactCapabilitySurfaceText(capability.nextSlice),
     "",
     "Guardrails:",
-    ...capability.guardrails.map((guardrail) => `- ${guardrail}`),
+    ...capability.guardrails.map((guardrail) => `- ${redactCapabilitySurfaceText(guardrail)}`),
     "",
-    `Inspect: /capabilities inspect ${capability.id}`,
+    `Inspect: /capabilities inspect ${redactCapabilitySurfaceText(capability.id)}`,
   ].join("\n");
 }
 
 function renderCapabilityInspect(capability: GstackInspiredCapability): string {
   return [
-    `Capability: ${capability.id}`,
+    `Capability: ${redactCapabilitySurfaceText(capability.id)}`,
     "",
-    `Title: ${capability.title}`,
-    `Status: ${capability.status}`,
-    `Priority: ${capability.priority}`,
+    `Title: ${redactCapabilitySurfaceText(capability.title)}`,
+    `Status: ${redactCapabilitySurfaceText(capability.status)}`,
+    `Priority: ${redactCapabilitySurfaceText(String(capability.priority))}`,
     "",
     "Rationale:",
-    capability.rationale,
+    redactCapabilitySurfaceText(capability.rationale),
     "",
     "Colony fit:",
-    capability.colonyFit,
+    redactCapabilitySurfaceText(capability.colonyFit),
     "",
     "Next slice:",
-    capability.nextSlice,
+    redactCapabilitySurfaceText(capability.nextSlice),
     "",
     "Guardrails:",
-    ...capability.guardrails.map((guardrail) => `- ${guardrail}`),
+    ...capability.guardrails.map((guardrail) => `- ${redactCapabilitySurfaceText(guardrail)}`),
     "",
     "Source signals:",
-    ...capability.sourceSignals.map((signal) => `- ${signal}`),
+    ...capability.sourceSignals.map((signal) => `- ${redactCapabilitySurfaceText(signal)}`),
     "",
     "Inspect: /capabilities | /capabilities next",
   ].join("\n");
+}
+
+function redactCapabilitySurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]");
 }
