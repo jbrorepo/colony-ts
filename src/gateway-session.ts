@@ -99,6 +99,17 @@ function redactSessionQuery(value: string): string {
     .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
 }
 
+function redactSessionSurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])(?:sk-ant|sk-proj|sk|xox[baprs])-[^\s"',;]+/gi, "$1[REDACTED]");
+}
+
+function joinRedactedCommandChoices(commands: string[]): string {
+  return joinCommandChoices(commands.map(redactSessionSurfaceText));
+}
+
 function normalizeSessionQuery(value: string): string {
   const redacted = redactSessionQuery(value);
   return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
@@ -717,10 +728,10 @@ export function renderSessionsCatalog(opts: {
 }): string {
   const lines = ["Persisted Sessions:", ""];
   if (opts.filters.length > 0) {
-    lines.push(`Filters: ${opts.filters.map(sessionFilterLabel).join(", ")}`);
+    lines.push(`Filters: ${opts.filters.map(sessionFilterLabel).map(redactSessionSurfaceText).join(", ")}`);
   }
   if (opts.search.length > 0) {
-    lines.push(`Search: ${opts.search}`);
+    lines.push(`Search: ${redactSessionSurfaceText(opts.search)}`);
   }
   if (opts.filters.length > 0 || opts.search.length > 0) {
     lines.push("");
@@ -736,34 +747,34 @@ export function renderSessionsCatalog(opts: {
     const currentTarget = opts.currentSessionId.length > 0 && opts.currentSessionId === sessionId;
     const marker = currentTarget ? " (current)" : "";
     const shortcutAliases = sessionShortcutAliases(sessionId, opts.newestInterruptedSessionId, opts.latestSessionId);
-    lines.push(`${catalogIndex}. ${sessionId}${marker}`);
+    lines.push(`${catalogIndex}. ${redactSessionSurfaceText(sessionId)}${marker}`);
     lines.push(
-      `  ${String(session.agentId ?? "unknown")} | ${String(session.caste ?? "unknown")} | ${Number(session.messageCount ?? 0)} msg | ${interruptionLabel(String(session.interruption ?? "none"))} | ${session.hasCheckpoint ? "checkpoint" : "transcript-only"}`,
+      `  ${redactSessionSurfaceText(String(session.agentId ?? "unknown"))} | ${redactSessionSurfaceText(String(session.caste ?? "unknown"))} | ${Number(session.messageCount ?? 0)} msg | ${redactSessionSurfaceText(interruptionLabel(String(session.interruption ?? "none")))} | ${session.hasCheckpoint ? "checkpoint" : "transcript-only"}`,
     );
     if (session.provider || session.model) {
-      lines.push(`  llm ${String(session.provider ?? "unknown")}:${String(session.model ?? "unknown")}`);
+      lines.push(`  llm ${redactSessionSurfaceText(String(session.provider ?? "unknown"))}:${redactSessionSurfaceText(String(session.model ?? "unknown"))}`);
     }
     if (typeof session.previewText === "string" && session.previewText.length > 0) {
-      lines.push(`  ${previewRoleLabel(session.previewRole)}: ${session.previewText}`);
+      lines.push(`  ${redactSessionSurfaceText(previewRoleLabel(session.previewRole))}: ${redactSessionSurfaceText(session.previewText)}`);
     }
     lines.push(
-      `  saved ${String(session.savedAt ?? "unknown")} | last ${String(session.lastMessageAt ?? "unknown")} | cost $${Number(session.costUsd ?? 0).toFixed(4)} | tokens ${Number(session.tokensUsed ?? 0).toLocaleString()}`,
+      `  saved ${redactSessionSurfaceText(String(session.savedAt ?? "unknown"))} | last ${redactSessionSurfaceText(String(session.lastMessageAt ?? "unknown"))} | cost $${Number(session.costUsd ?? 0).toFixed(4)} | tokens ${Number(session.tokensUsed ?? 0).toLocaleString()}`,
     );
     const resumeHint = currentTarget
-      ? joinCommandChoices([
+      ? joinRedactedCommandChoices([
           `/resume ${sessionId}`,
           "/status",
           "/cost",
           "/clear",
         ])
-      : joinCommandChoices([
+      : joinRedactedCommandChoices([
           ...shortcutAliases.map((alias) => `/resume ${alias}`),
           `/resume ${catalogIndex}`,
           `/resume ${sessionId}`,
         ]);
     const historyHint = currentTarget
-      ? joinCommandChoices(opts.currentHistoryCommands)
-      : joinCommandChoices([
+      ? joinRedactedCommandChoices(opts.currentHistoryCommands)
+      : joinRedactedCommandChoices([
           ...shortcutAliases.map((alias) => `/history ${alias} 8`),
           `/history ${catalogIndex} 8`,
           `/history ${sessionId} 8`,
