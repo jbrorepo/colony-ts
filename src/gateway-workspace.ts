@@ -1,3 +1,5 @@
+import { scrubSecrets } from "./security/log-sanitizer";
+
 export type WorkspaceViewMode = "summary" | "packages" | "dev" | "verify";
 
 export interface GatewayWorkspaceCommandPayload {
@@ -41,6 +43,23 @@ function redactWorkspaceInput(value: string): string {
     .replace(/\b(?:sk|xox[baprs])-[A-Za-z0-9._-]{8,}\b/g, "[REDACTED]");
 }
 
+function redactWorkspaceSurfaceText(value: string): string {
+  return scrubSecrets(value.replace(/[\r\n]+/g, " ").trim())
+    .replace(/(^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{8,}/g, "$1[REDACTED]")
+    .replace(/(^|[^A-Za-z0-9])(?:sk-ant|sk-proj|sk|xox[baprs])-[^\s"',;]+/gi, "$1[REDACTED]");
+}
+
+function redactWorkspaceList(values: string[] | undefined, limit?: number): string {
+  const visible = typeof limit === "number" ? values?.slice(0, limit) : values;
+  return visible?.map(redactWorkspaceSurfaceText).join(", ") ?? "";
+}
+
+function redactWorkspaceCommandList(values: string[] | undefined, limit?: number): string {
+  const visible = typeof limit === "number" ? values?.slice(0, limit) : values;
+  return visible?.map(redactWorkspaceSurfaceText).join(" | ") ?? "";
+}
+
 function normalizeWorkspaceToken(value: string | undefined): string {
   const raw = value?.trim() ?? "";
   if (!raw || raw.startsWith("--")) return "";
@@ -70,31 +89,31 @@ export function resolveWorkspaceView(args: string[]): WorkspaceViewMode | { erro
 export function renderWorkspaceDetailLines(workspace: GatewayWorkspaceView): string[] {
   const lines: string[] = [];
   lines.push(`Detected: ${workspace.detected ? "yes" : "no"}`);
-  lines.push(`Name: ${workspace.name}`);
-  lines.push(`Root: ${workspace.root}`);
-  if (workspace.startDir) lines.push(`Start dir: ${workspace.startDir}`);
-  lines.push(`Type: ${workspace.projectType}`);
-  lines.push(`Package manager: ${workspace.packageManager}`);
-  if (workspace.workspaceMode) lines.push(`Mode: ${workspace.workspaceMode}`);
-  if (workspace.workspaceIntent) lines.push(`Intent: ${workspace.workspaceIntent}`);
-  if (workspace.workspacePrimaryTargets?.length) lines.push(`Primary targets: ${workspace.workspacePrimaryTargets.slice(0, 4).join(", ")}`);
+  lines.push(`Name: ${redactWorkspaceSurfaceText(workspace.name)}`);
+  lines.push(`Root: ${redactWorkspaceSurfaceText(workspace.root)}`);
+  if (workspace.startDir) lines.push(`Start dir: ${redactWorkspaceSurfaceText(workspace.startDir)}`);
+  lines.push(`Type: ${redactWorkspaceSurfaceText(workspace.projectType)}`);
+  lines.push(`Package manager: ${redactWorkspaceSurfaceText(workspace.packageManager)}`);
+  if (workspace.workspaceMode) lines.push(`Mode: ${redactWorkspaceSurfaceText(workspace.workspaceMode)}`);
+  if (workspace.workspaceIntent) lines.push(`Intent: ${redactWorkspaceSurfaceText(workspace.workspaceIntent)}`);
+  if (workspace.workspacePrimaryTargets?.length) lines.push(`Primary targets: ${redactWorkspaceList(workspace.workspacePrimaryTargets, 4)}`);
   if (Number(workspace.workspacePackageCount ?? 0) > 0) {
     lines.push(
       `Workspace packages: ${workspace.workspacePackageCount} total (${workspace.workspaceAppCount ?? 0} app, ${workspace.workspaceLibraryCount ?? 0} library, ${workspace.workspaceOtherCount ?? 0} other)`,
     );
   }
-  if (workspace.workspaceAppPackages?.length) lines.push(`Workspace apps: ${workspace.workspaceAppPackages.slice(0, 4).join(", ")}`);
-  if (workspace.workspaceLibraryPackages?.length) lines.push(`Workspace libraries: ${workspace.workspaceLibraryPackages.slice(0, 4).join(", ")}`);
-  if (workspace.workspaceOtherPackages?.length) lines.push(`Workspace other: ${workspace.workspaceOtherPackages.slice(0, 4).join(", ")}`);
-  if (workspace.workspaceDevCandidates?.length) lines.push(`Workspace dev candidates: ${workspace.workspaceDevCandidates.slice(0, 3).join(" | ")}`);
-  if (workspace.workspaceVerifyCandidates?.length) lines.push(`Workspace verify candidates: ${workspace.workspaceVerifyCandidates.slice(0, 3).join(" | ")}`);
-  if (workspace.workspaceGlobs?.length) lines.push(`Workspace globs: ${workspace.workspaceGlobs.join(", ")}`);
-  if (workspace.stackHints?.length) lines.push(`Stack: ${workspace.stackHints.join(", ")}`);
-  if (workspace.scriptNames?.length) lines.push(`Scripts: ${workspace.scriptNames.join(", ")}`);
-  if (workspace.devCommand) lines.push(`Dev command: ${workspace.devCommand}`);
-  if (workspace.verifyCommand) lines.push(`Verify command: ${workspace.verifyCommand}`);
-  if (workspace.reason) lines.push(`Reason: ${workspace.reason}`);
-  if (workspace.markers?.length) lines.push(`Markers: ${workspace.markers.join(", ")}`);
+  if (workspace.workspaceAppPackages?.length) lines.push(`Workspace apps: ${redactWorkspaceList(workspace.workspaceAppPackages, 4)}`);
+  if (workspace.workspaceLibraryPackages?.length) lines.push(`Workspace libraries: ${redactWorkspaceList(workspace.workspaceLibraryPackages, 4)}`);
+  if (workspace.workspaceOtherPackages?.length) lines.push(`Workspace other: ${redactWorkspaceList(workspace.workspaceOtherPackages, 4)}`);
+  if (workspace.workspaceDevCandidates?.length) lines.push(`Workspace dev candidates: ${redactWorkspaceCommandList(workspace.workspaceDevCandidates, 3)}`);
+  if (workspace.workspaceVerifyCandidates?.length) lines.push(`Workspace verify candidates: ${redactWorkspaceCommandList(workspace.workspaceVerifyCandidates, 3)}`);
+  if (workspace.workspaceGlobs?.length) lines.push(`Workspace globs: ${redactWorkspaceList(workspace.workspaceGlobs)}`);
+  if (workspace.stackHints?.length) lines.push(`Stack: ${redactWorkspaceList(workspace.stackHints)}`);
+  if (workspace.scriptNames?.length) lines.push(`Scripts: ${redactWorkspaceList(workspace.scriptNames)}`);
+  if (workspace.devCommand) lines.push(`Dev command: ${redactWorkspaceSurfaceText(workspace.devCommand)}`);
+  if (workspace.verifyCommand) lines.push(`Verify command: ${redactWorkspaceSurfaceText(workspace.verifyCommand)}`);
+  if (workspace.reason) lines.push(`Reason: ${redactWorkspaceSurfaceText(workspace.reason)}`);
+  if (workspace.markers?.length) lines.push(`Markers: ${redactWorkspaceList(workspace.markers)}`);
   return lines;
 }
 
@@ -107,11 +126,11 @@ export function renderWorkspaceSummary(workspace: GatewayWorkspaceView): string 
 export function renderWorkspacePackagesView(workspace: GatewayWorkspaceView): string {
   const lines = ["Workspace Packages:", ""];
   lines.push(`Workspace packages: ${workspace.workspacePackageCount ?? 0} total (${workspace.workspaceAppCount ?? 0} app, ${workspace.workspaceLibraryCount ?? 0} library, ${workspace.workspaceOtherCount ?? 0} other)`);
-  lines.push(`Root: ${workspace.root}`);
-  if (workspace.workspaceAppPackages?.length) lines.push(`Apps: ${workspace.workspaceAppPackages.join(", ")}`);
-  if (workspace.workspaceLibraryPackages?.length) lines.push(`Libraries: ${workspace.workspaceLibraryPackages.join(", ")}`);
-  if (workspace.workspaceOtherPackages?.length) lines.push(`Other packages: ${workspace.workspaceOtherPackages.join(", ")}`);
-  if (workspace.workspaceGlobs?.length) lines.push(`Workspaces: ${workspace.workspaceGlobs.join(", ")}`);
+  lines.push(`Root: ${redactWorkspaceSurfaceText(workspace.root)}`);
+  if (workspace.workspaceAppPackages?.length) lines.push(`Apps: ${redactWorkspaceList(workspace.workspaceAppPackages)}`);
+  if (workspace.workspaceLibraryPackages?.length) lines.push(`Libraries: ${redactWorkspaceList(workspace.workspaceLibraryPackages)}`);
+  if (workspace.workspaceOtherPackages?.length) lines.push(`Other packages: ${redactWorkspaceList(workspace.workspaceOtherPackages)}`);
+  if (workspace.workspaceGlobs?.length) lines.push(`Workspaces: ${redactWorkspaceList(workspace.workspaceGlobs)}`);
   lines.push(`Inspect: ${workspaceInspectViews()}`);
   return lines.join("\n");
 }
@@ -127,14 +146,14 @@ export function renderWorkspaceCommandView(
   const packageLabel = mode === "dev" ? "Package dev candidates" : "Package verify candidates";
 
   const lines = [title, ""];
-  lines.push(`Root: ${workspace.root}`);
+  lines.push(`Root: ${redactWorkspaceSurfaceText(workspace.root)}`);
   if (rootCommand) {
-    lines.push(`${rootLabel}: ${rootCommand}`);
+    lines.push(`${rootLabel}: ${redactWorkspaceSurfaceText(rootCommand)}`);
   } else {
     lines.push(`${rootLabel}: none`);
   }
   if (candidates?.length) {
-    lines.push(`${packageLabel}: ${candidates.join(" | ")}`);
+    lines.push(`${packageLabel}: ${redactWorkspaceCommandList(candidates)}`);
   } else {
     lines.push(`${packageLabel}: none`);
   }
