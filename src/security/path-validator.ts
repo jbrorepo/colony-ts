@@ -105,6 +105,13 @@ export class PathValidator {
       };
     }
 
+    // Symlink-deny mode: when allowSymlinks is false, reject paths whose
+    // final component is itself a symlink. Workspace-escape via symlink
+    // targets is already covered by the realpath-resolved isWithinAllowed
+    // check above (resolvedPath is the canonical target). This second
+    // check exists specifically for the "no symlinks at all under the
+    // workspace" deny posture — it inspects the literal path so a symlink
+    // whose target happens to land inside the workspace is still refused.
     if (!this.allowSymlinks && (await isSymlink(literal))) {
       return {
         allowed: false,

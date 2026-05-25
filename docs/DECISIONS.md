@@ -81,7 +81,7 @@
 | D27 | **Each task = one commit, each phase = one PR** | Clean history; branch naming: `phase-{N}-{short-name}` | Pre-project | Roadmap |
 | D28 | **Never add `from __future__ import annotations`** to `app.py` or `pwa/router.py` | Causes Pydantic/FastAPI forward-ref errors in the Python codebase | Pre-project | Roadmap critical rules |
 | D29 | **ActivityType uses `TOOL_CALL_START`/`TOOL_CALL_END`** — NOT `TOOL_CALL` | Avoids name collisions with audit event types | Pre-project | Roadmap critical rules |
-| D30 | **Verification suites as test runner** (not Jest/Vitest) | Project-local `verify-phase*.ts` scripts and named package gates remain the test-runner convention; current release truth is `verify:phase282` plus `tsc --noEmit` through `verify:all`, with focused gates such as `verify:alpha0` for launch scope. | May 14, 2026 | QA Report + cleanup source-of-truth refresh |
+| D30 | **Verification suites as test runner** (not Jest/Vitest) | Project-local `verify-phase*.ts` scripts and named package gates remain the test-runner convention; current release truth is `verify:phase384` plus `tsc --noEmit` through `verify:all`, with focused gates such as `verify:alpha0` for launch scope. | May 23, 2026 | Phase 382 source-of-truth refresh |
 
 ---
 

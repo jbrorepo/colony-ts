@@ -1,4 +1,4 @@
-import { scrubSecrets } from "./security/log-sanitizer";
+import { redactOperatorSurfaceText } from "./operator-surface-redaction";
 
 export type DoctorFilterMode =
   | "all"
@@ -71,7 +71,7 @@ function doctorChecklistLine(
     checks.find((check) => !check.passed)?.message
     ?? checks.find((check) => typeof check.message === "string" && check.message.length > 0)?.message
     ?? fallback;
-  return `${label}: ${status} | ${focus}`;
+  return `${label}: ${status} | ${redactDoctorSurfaceText(focus)}`;
 }
 
 export function doctorFilterLabel(mode: DoctorFilterMode): string {
@@ -99,9 +99,11 @@ export function doctorInspectViews(): string {
 }
 
 function redactDoctorQuery(value: string): string {
-  return scrubSecrets(value.trim())
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redactOperatorSurfaceText(value.trim());
+}
+
+function redactDoctorSurfaceText(value: string): string {
+  return redactOperatorSurfaceText(value);
 }
 
 function normalizeDoctorQueryArgs(args: string[]): string[] {
@@ -386,24 +388,24 @@ export function doctorProviderDiagnosticsLines(
 
   const lines = ["", "Provider diagnostics:"];
   if (focusProvider) {
-    lines.push(`Focus: ${focusProvider}`);
+    lines.push(`Focus: ${redactDoctorSurfaceText(focusProvider)}`);
   }
   if (healthSummary) {
-    lines.push(`Observed health: ${healthSummary}`);
+    lines.push(`Observed health: ${redactDoctorSurfaceText(healthSummary)}`);
   }
   if (latestFailover) {
-    lines.push(`Latest failover: ${latestFailover}`);
+    lines.push(`Latest failover: ${redactDoctorSurfaceText(latestFailover)}`);
   }
   if (failoverLines.length > 0) {
     for (const line of failoverLines) {
-      lines.push(line);
+      lines.push(redactDoctorSurfaceText(line));
     }
     if (recentFailovers.length > failoverLines.length) {
       lines.push(`Older failovers hidden: ${recentFailovers.length - failoverLines.length}`);
     }
   }
   for (const hint of recoveryHints) {
-    lines.push(`Recovery: ${hint}`);
+    lines.push(`Recovery: ${redactDoctorSurfaceText(hint)}`);
   }
   lines.push("Inspect: /provider | /provider current | /provider failovers");
   return lines;
@@ -436,8 +438,8 @@ export function renderDoctorFirstRunLines(opts: {
 
   if (opts.workspaceDetected) {
     const commandBits = [
-      opts.devCommand ? `dev: ${opts.devCommand}` : opts.devCandidate ? `dev pick: ${opts.devCandidate}` : null,
-      opts.verifyCommand ? `verify: ${opts.verifyCommand}` : opts.verifyCandidate ? `verify pick: ${opts.verifyCandidate}` : null,
+      opts.devCommand ? `dev: ${redactDoctorSurfaceText(opts.devCommand)}` : opts.devCandidate ? `dev pick: ${redactDoctorSurfaceText(opts.devCandidate)}` : null,
+      opts.verifyCommand ? `verify: ${redactDoctorSurfaceText(opts.verifyCommand)}` : opts.verifyCandidate ? `verify pick: ${redactDoctorSurfaceText(opts.verifyCandidate)}` : null,
     ].filter(Boolean);
     lines.push(`Project commands: ${commandBits.length > 0 ? commandBits.join(" | ") : "warn | no dev or verify command found"}`);
   }
@@ -471,7 +473,7 @@ export function renderDoctorView(opts: {
   ];
   if (opts.mode !== "all" || opts.query) {
     lines.push(`Mode: ${doctorFilterLabel(opts.mode)}`);
-    if (opts.query) lines.push(`Search: ${opts.query}`);
+    if (opts.query) lines.push(`Search: ${redactDoctorSurfaceText(opts.query)}`);
     lines.push(`Showing: ${opts.visibleChecks.length} of ${opts.allCheckCount} checks`);
   }
 
@@ -513,15 +515,15 @@ export function renderDoctorView(opts: {
   } else {
     lines.push("");
     for (const check of opts.visibleChecks) {
-      lines.push(`${check.prefix ?? "?"}: ${check.name ?? "check"} - ${check.message ?? ""}`.trim());
+      lines.push(`${redactDoctorSurfaceText(check.prefix ?? "?")}: ${redactDoctorSurfaceText(check.name ?? "check")} - ${redactDoctorSurfaceText(check.message ?? "")}`.trim());
       if (!check.passed && check.fix) {
-        lines.push(`fix: ${check.fix}`);
+        lines.push(`fix: ${redactDoctorSurfaceText(check.fix)}`);
       }
     }
     if (opts.inspectHints.length > 0) {
       lines.push("");
       for (const hint of opts.inspectHints) {
-        lines.push(`Inspect: ${hint}`);
+        lines.push(`Inspect: ${redactDoctorSurfaceText(hint)}`);
       }
     }
   }

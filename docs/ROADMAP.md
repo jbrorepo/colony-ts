@@ -55,9 +55,10 @@ For current built/not-built truth, see [PROJECT_STATE.md](./PROJECT_STATE.md). F
 - Lifecycle default UX command panel digest clipboard review closeout packets now project review checklists into read-only bounded operator/reviewer closeout packets grouped as ready commands, approval remediation, and safety summaries, with closeout text, review-line preservation, copy text, closeout-ready/blocker states, blocker preservation, redaction, and default-live-execution denial.
 - Lifecycle default UX command panel digest clipboard review closeout summary packets now project closeout packets into read-only bounded operator/reviewer summary packets grouped as ready commands, approval remediation, and safety summaries, with summary text, closeout/review-line preservation, copy text, summary-ready/blocker states, blocker preservation, redaction, and default-live-execution denial.
 - Web control remains local-first and scoped; the operator shell renders provider/workflow/swarm/channel status, mutation handoff controls are opt-in, require `web.mutate`, reject non-local hosts, and do not execute actions directly.
-- The current verification frontier is `verify:phase282` plus `tsc --noEmit`
+- The current verification frontier is `verify:phase384` plus `tsc --noEmit`
   through `bun run verify:all`; `verify:alpha0` remains the focused Launch
   Alpha 0 gate.
+- Provider, doctor/onboarding, and memory inspection operator surfaces now have Phase 379 through Phase 381 redaction coverage for secret-shaped metadata.
 
 ## What This Means
 

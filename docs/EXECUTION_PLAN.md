@@ -69,7 +69,7 @@ Deliverables:
 2. Refresh gap analysis around real remaining work.
 3. Add deep execution plan with dependencies and file targets.
 4. Add benchmark board scoring capability-class parity against Claude Code and OpenClaw.
-5. Make `verify:all` include the active verification frontier (`verify:phase282` as of 2026-05-14).
+5. Make `verify:all` include the active verification frontier (`verify:phase384` as of 2026-05-24).
 6. Remove or ship misleading claims around `/swarm`, unshipped web tools, provider count, and verification count.
 7. Keep the 12-caste method framework compatibility-first: legacy Python caste values remain accepted for persisted runtime state while public/operator language prefers Queen, Eldest, Assist-Ant, Command-ant, Vigil-ant, Develop-ant, Logist-ant, Consult-ant, Inform-ant, Cogniz-ant, Account-ant, and Oper-ant.
 

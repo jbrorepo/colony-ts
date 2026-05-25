@@ -23,7 +23,7 @@ Usage:  bun run dev
 
 ## Required Operator Smoke
 
-Run these steps from a real interactive terminal before tagging Alpha 0:
+Run these steps from a real interactive terminal before tagging Alpha 0; manual terminal UI smoke remains required:
 
 ```text
 bun run start

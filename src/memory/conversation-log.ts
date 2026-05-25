@@ -78,6 +78,13 @@ export class ConversationLogger {
     content: string,
     metadata?: Record<string, unknown> | null,
   ): Promise<LoggedTurnRecord> {
+    // Canonical transcript truth (Critical Rule 6) here means
+    // "post-secret-redaction verbatim": the persisted log preserves every
+    // user character EXCEPT credential-shaped fragments (API keys, bearer
+    // tokens, password=/secret=/token= values), which are deliberately
+    // replaced with masked equivalents. This is the one allowed deviation
+    // from byte-exact preservation, and it is intentional — secrets must
+    // never land on disk in plain text.
     const record: LoggedTurnRecord = {
       turn_id: randomUUID().replace(/-/g, "").slice(0, 12),
       session_id: sessionId,

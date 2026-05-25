@@ -20,17 +20,16 @@ implementation plan is
 | Alpha 2 | Local web-control UX | Local-only authenticated web control can inspect runs, request approved local actions, and reject missing scopes/public listeners by default |
 | Alpha 3 | Memory and MemPalace polish | Phase 232 verifies real-session recall QA for transcript truth separation, derived ownership/decision visibility, palace issue/path routing, procedure routing, body-safe diagnostics, and exact-only accounting; recovery UX polish remains gap-driven |
 | Beta 1 | Swarm production hardening | Phase 233 ships stage timeline/retry-history/artifact-review/interrupted-resume/approval-wait inspection, injected failure coverage, and restart-safe cancellation preservation; broader long-run hardening remains |
-| Beta 2 | MCP/plugin execution fabric and remote action hardening | Phase 278 adds read-only marketplace lifecycle default UX command panel digest clipboard review closeout summary packets over Phase 277 closeout packets, following Phase 276 review packets, Phase 275 clipboard packets, Phase 274 digests, Phase 273 command panels, Phase 272 command transcripts, Phase 271 command briefs, Phase 270 command palettes, Phase 269 prompt plans, Phase 268 operator queues, Phase 267 host handoff requests, Phase 266 approval handoff preflights, Phase 265 approval handoffs, Phase 264 read-only marketplace lifecycle approval review over supplied approval evidence, Phase 263 read-only marketplace lifecycle approval packets over approval-required runbook steps, Phase 262 read-only marketplace lifecycle runbook steps over lifecycle handoffs, Phase 261 read-only marketplace lifecycle handoff from lifecycle states into bounded operator-only approval/inspection checklists, Phase 260 read-only marketplace lifecycle status over metadata planning, metadata-bound install/update execution status, activation readiness, and activation execution status, Phase 259 read-only metadata-bound marketplace activation execution status projection over Phase 256 readiness and Phase 258 receipts, Phase 258 approved metadata-bound marketplace activation handoff execution receipts, Phase 257 redacted metadata-bound marketplace activation handoff descriptors, Phase 256 read-only metadata-bound marketplace activation readiness, Phase 255 read-only metadata-bound marketplace install/update execution status, Phase 254 approved metadata-bound marketplace install/update handoff execution receipts, Phase 253 metadata-bound marketplace install/update handoff descriptors, Phase 252 read-only marketplace registry-fetch metadata planning, Phase 251 approved marketplace registry fetch handoff execution receipts, Phase 250 read-only marketplace registry fetch execution status, Phase 249 marketplace registry metadata fetch handoff descriptors, Phase 248 approved marketplace install/update handoff execution receipts, Phase 247 read-only marketplace install/update execution status projection, Phase 246 redacted marketplace install/update handoff descriptors, Phase 245 read-only activation execution status projection, Phase 244 approved plugin marketplace activation handoff execution receipts, Phase 243 redacted handoff descriptors, Phase 242 activation readiness, Phase 241 marketplace view, Phase 240 approved host-executed package-code receipts, Phase 239 preflights, Phase 238 registry fetch receipts, Phase 237's host/network boundary, Phase 234 approved install/update receipts, Phase 235 supplied registry metadata, and Phase 236 sidecar activation controls; built-in live/default registry fetch/install UX beyond injected handoff execution/status/views/planning, default/live activation UX beyond explicit approved handoff execution, and broader daemon/client/workflow hardening remain |
+| Beta 2 | MCP/plugin execution fabric, remote action hardening, and operator trust surfaces | Phase 278 completes the read-only marketplace lifecycle closeout-summary chain, and Phases 379 through 381 harden provider, doctor/onboarding, and memory inspection redaction. Built-in live/default registry fetch/install UX beyond injected handoff execution/status/views/planning, default/live activation UX beyond explicit approved handoff execution, and broader daemon/client/workflow hardening remain |
 | Beta 3 | External channels as host-owned adapters | Phase 92 through Phase 225 now have full focused verification evidence for host-owned setup, signed webhook/deferred ACK, media metadata, media transfer, manual reinvoke, retry-control, execution receipt, closeout, audit, retry-ledger, operator handoff, worker-selection, handler-readiness, foreground worker execution, receipt preflight, closeout readiness, supplied closeout-preflight, and closeout record-plan boundaries; default live delivery, public hosting, credential persistence, background retry workers, automatic vendor retry, and raw host-data persistence remain non-goals |
 | Release Candidate | Packaging, support, and docs | Source+Bun, optional binary, troubleshooting, dependency review, launch checklist, release notes, provider-readiness evidence, manual TTY smoke, clean-checkout rehearsal, and support evidence are repeatable from a clean checkout |
 
-Beta 2 current frontier: Phase 278 adds read-only marketplace lifecycle default
-UX command panel digest clipboard review closeout summary packets over Phase
-277 closeout packets, mapping ready commands and approval blockers into bounded
-ready-command and approval-remediation summary items with fixed safety
-summaries, summary text, summary-ready/blocker states, copy text,
-closeout/review-line preservation, and no host action execution or default live
-execution.
+Current frontier: Phase 384 (`verify:phase384`). Beta 2 includes the Phase 278 read-only marketplace
+lifecycle closeout-summary chain plus Phase 379 provider redaction, Phase 380
+doctor/onboarding redaction, and Phase 381 memory inspection redaction. This is
+operator trust hardening only: no default live plugin install, no public web
+hosting, no default external channel delivery, no credential persistence, no
+push, and no PR creation.
 
 Beta 3 current frontier: Bucket 9 review evidence now records `bun run
 verify:phase92` through `bun run verify:phase225` passing via a
@@ -54,7 +53,7 @@ worker productization, not default delivery.
 
 ## Immediate Queue
 
-1. Run and record the manual terminal UI smoke from a real interactive terminal:
+1. Run and record the manual terminal UI smoke from a real interactive terminal; manual terminal UI smoke remains required:
    - `bun run start`
    - `/doctor first-run`
    - `/swarm llm "prepare a concise local-first alpha launch checklist"`

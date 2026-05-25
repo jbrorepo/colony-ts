@@ -134,6 +134,16 @@ export class OllamaProvider extends LLMProvider {
     const messageData = (data.message ?? {}) as Record<string, unknown>;
     const content = String(messageData.content ?? "");
 
+    // Capture chain-of-thought from reasoning-capable models (Gemma 4 and
+    // similar Ollama-hosted reasoning models). Ollama surfaces this under
+    // `message.thinking`. Forward it as LLMResponse.reasoning so callers
+    // can diagnose empty-content + done_reason=length cases instead of
+    // silently dropping the entire model contribution.
+    const thinkingRaw = messageData.thinking;
+    const reasoning = typeof thinkingRaw === "string" && thinkingRaw.length > 0
+      ? thinkingRaw
+      : undefined;
+
     // Parse tool calls
     let rawResponse: Record<string, unknown> | undefined;
     const toolCallsData = (messageData.tool_calls ?? []) as Record<string, unknown>[];
@@ -173,6 +183,7 @@ export class OllamaProvider extends LLMProvider {
       usage,
       finishReason,
       rawResponse,
+      reasoning,
     });
   }
 

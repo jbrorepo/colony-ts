@@ -2,7 +2,9 @@
  * SQLite persistence layer for The Colony.
  *
  * Uses bun:sqlite for zero-dependency embedded persistence.
- * Provides the Store subsystem used by BootstrapCoordinator.
+ * Designed to plug into BootstrapCoordinator as a Store subsystem; the
+ * live entry path (src/index.tsx) currently imports the SQLite helpers
+ * directly without going through the coordinator (see bootstrap.ts).
  */
 
 import { mkdir } from "fs/promises";

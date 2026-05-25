@@ -23,7 +23,7 @@ Launch Alpha 0 is a public source+Bun alpha. The proof path is:
 - Real AgentLoop terminal runtime.
 - Ollama-first provider stack with optional cloud providers.
 - Conservative approvals and tool externalization.
-- 12-caste method framework compatibility through `verify:phase282`: canonical
+- 12-caste method framework compatibility through `verify:phase384`: canonical
   method names are preferred in operator-facing and model-facing display, while
   legacy Python caste values remain accepted for persisted runtime state.
 - Memory, MemPalace, and recall inspection foundations.
@@ -43,6 +43,9 @@ Launch Alpha 0 is a public source+Bun alpha. The proof path is:
 - Read-only marketplace lifecycle default UX command panel digest clipboard review packets now project clipboard packets into bounded operator/reviewer review checklists grouped as ready commands, approval remediation, and safety summaries, with review text, copy text, review-ready/blocker states, blocker preservation, redaction, and default-live-execution denial.
 - Read-only marketplace lifecycle default UX command panel digest clipboard review closeout packets now project review checklists into bounded operator/reviewer closeout packets grouped as ready commands, approval remediation, and safety summaries, with closeout text, copy text, review-line preservation, closeout-ready/blocker states, blocker preservation, redaction, and default-live-execution denial.
 - Read-only marketplace lifecycle default UX command panel digest clipboard review closeout summary packets now project closeout packets into bounded operator/reviewer summary packets grouped as ready commands, approval remediation, and safety summaries, with summary text, copy text, closeout/review-line preservation, summary-ready/blocker states, blocker preservation, redaction, and default-live-execution denial.
+- Phase 379 hardens provider performance and failover operator surfaces so secret-shaped provider/model/event metadata is redacted before display.
+- Phase 380 hardens doctor, first-run, onboarding, and provider diagnostic surfaces so search queries, fixes, hints, and provider health/failover lines do not leak secret-shaped metadata.
+- Phase 381 hardens memory status, routing, and palace inspection surfaces so truth provenance, section labels, no-hit reasons, palace paths, source files, traversal labels, and fallback labels redact secret-shaped metadata.
 
 ## Not Built For Alpha 0
 

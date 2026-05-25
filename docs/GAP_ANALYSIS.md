@@ -67,7 +67,7 @@ Current TS baseline already includes:
 - Security additions: audit trail, policy engine, secret scanner, path validator.
 - Caveman outbound compression bridge.
 
-Current verification frontier is `verify:phase282` plus `tsc --noEmit` through `bun run verify:all`; Launch Alpha 0 has the focused `verify:alpha0` gate.
+Current verification frontier is `verify:phase384` plus `tsc --noEmit` through `bun run verify:all`; Launch Alpha 0 has the focused `verify:alpha0` gate.
 
 ## Coverage Summary
 
@@ -133,6 +133,7 @@ These remain major gaps:
 - Gateway daemon and multi-surface delivery beyond the shipped control-plane API, HTTP transport/client, scoped auth, and first channel foundations.
 - Channel integration depth beyond the shipped in-memory channel, webhook auth, local webhook listener, route-to-session bridge, contract-only Slack/Discord/Telegram-style fixtures, first outbound Slack/Discord/Telegram adapter classes, approval-gated registration helpers, inbound signature helpers, Slack/Discord setup request staging, host-owned Slack/Discord setup executors, Slack retry/readiness/fast-ACK depth, approval-bound mention-only `app_mention` support, bounded in-memory duplicate suppression for signed and host-authenticated Slack `message`/`app_mention` retries, redacted durable approved Slack event binding before bridge dispatch, inbound-only Slack media metadata inspection, and Discord command dispatch foundations.
 - Release-grade doctor, first-run, and packaging experience.
+- Operator-surface redaction is materially stronger after Phase 379 through Phase 381 for provider, doctor, and memory inspection surfaces, but end-to-end hardening continues as new surfaces are added.
 
 ## True Priority Order
 

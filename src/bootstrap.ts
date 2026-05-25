@@ -1,15 +1,24 @@
 /**
- * Application bootstrap & subsystem wiring.
+ * Application bootstrap & subsystem wiring (reusable primitive).
  *
- * 1:1 port of colony/bootstrap.py — coordinates the startup and shutdown
- * of all colony subsystems in the correct dependency order:
+ * Behavioral port of colony/bootstrap.py. Provides an ordered subsystem
+ * lifecycle primitive (init → ready → shutdown) with critical-failure
+ * halting, health aggregation, and dependency-order teardown.
  *
- *   Startup:  store → security → llm → gateway
- *   Shutdown: gateway → llm → security → store
+ *   Reference startup order:  store → security → llm → gateway
+ *   Reference shutdown order: gateway → llm → security → store
  *
  * Each subsystem implements the Subsystem interface with init() and
  * teardown() async methods. The BootstrapCoordinator manages ordering,
  * error handling, and health aggregation.
+ *
+ * NOTE: The live Bun entry point (src/index.tsx) does NOT currently use
+ * this coordinator on the runtime path — it installs the log sanitizer
+ * first and then imports the UI module directly. This file is exercised
+ * end-to-end by verify-phase1.ts (test 4: critical-failure halt, duplicate
+ * registration, ordered teardown). Treat the coordinator as available
+ * infrastructure for future subsystem orchestration; do not assume any
+ * production import currently calls boot()/shutdown().
  */
 
 import { SubsystemState } from "./caste/enums";

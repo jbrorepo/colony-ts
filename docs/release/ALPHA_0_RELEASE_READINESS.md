@@ -16,7 +16,7 @@
 
 - [x] Concept Fit evidence exists: source+Bun alpha scope is documented in `docs/LAUNCH_ALPHA_0.md`.
 - [x] Problem-Solution Fit evidence exists: real planner/worker/reviewer demo is verified by `verify:phase226`.
-- [x] Identity compatibility evidence exists: 12-caste method framework compatibility is verified by `verify:phase282`, with legacy persisted caste values retained as compatibility aliases.
+- [x] Identity and current regression evidence exists: 12-caste method framework compatibility remains covered, and the current full gate reaches `verify:phase384` plus TypeScript, with legacy persisted caste values retained as compatibility aliases.
 - [x] Investment Case is waived for this public source+Bun alpha.
 - [x] Build Readiness artifacts are complete enough for Alpha 0: README, launch scope, project state, inventory, commit buckets, and release notes exist.
 

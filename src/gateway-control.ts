@@ -28,6 +28,7 @@ import {
 import type { AgentSession } from "./runtime/session";
 import { renderModelStatusView } from "./gateway-runtime";
 import { scrubSecrets } from "./security/log-sanitizer";
+import { redactOperatorSurfaceText, redactOperatorSurfaceList } from "./operator-surface-redaction";
 
 export interface GatewayControlCommandPayload {
   output: string;
@@ -405,6 +406,14 @@ function normalizeMemoryCommandInput(value: string): string {
   return redacted.includes("[REDACTED]") ? redacted : redacted.toLowerCase();
 }
 
+function redactMemorySurfaceText(value: string): string {
+  return redactOperatorSurfaceText(value);
+}
+
+function formatMemorySurfaceList(values: string[] | undefined, separator: string, fallback = "none"): string {
+  return redactOperatorSurfaceList(values, separator, fallback);
+}
+
 function inferMemoryRecallControlPlan(input: {
   truthMode: MemoryTruthMode;
   hall?: string;
@@ -465,13 +474,13 @@ function renderMemoryStatusView(
     lines.push("Last recall: none yet");
   } else {
     lines.push(
-      `Last recall: ${memoryTruthModeLabel(lastRecall.truthMode ?? null)} (${lastRecall.truthModeSource ?? "inferred"}${lastRecall.truthProvenance?.length ? `:${lastRecall.truthProvenance.join("+")}` : ""})`,
+      `Last recall: ${memoryTruthModeLabel(lastRecall.truthMode ?? null)} (${redactMemorySurfaceText(lastRecall.truthModeSource ?? "inferred")}${lastRecall.truthProvenance?.length ? `:${formatMemorySurfaceList(lastRecall.truthProvenance, "+")}` : ""})`,
     );
-    lines.push(`Sections shown: ${lastRecall.shownSections?.join(">") || "none"}`);
+    lines.push(`Sections shown: ${formatMemorySurfaceList(lastRecall.shownSections, ">")}`);
     lines.push(
       `Shown counts: exact ${lastRecall.exact?.shown ?? 0}/${lastRecall.exact?.total ?? 0} | compact ${lastRecall.compact?.shown ?? 0}/${lastRecall.compact?.total ?? 0} | structured ${lastRecall.structured?.shown ?? 0}/${lastRecall.structured?.total ?? 0} | palace ${lastRecall.palace?.direct?.shown ?? 0}/${lastRecall.palace?.direct?.total ?? 0},${lastRecall.palace?.nearby?.shown ?? 0}/${lastRecall.palace?.nearby?.total ?? 0},${lastRecall.palace?.broader?.shown ?? 0}/${lastRecall.palace?.broader?.total ?? 0},${lastRecall.palace?.related?.shown ?? 0}/${lastRecall.palace?.related?.total ?? 0}`,
     );
-    if (lastRecall.noHitReason) lines.push(`No-hit: ${lastRecall.noHitReason}`);
+    if (lastRecall.noHitReason) lines.push(`No-hit: ${redactMemorySurfaceText(lastRecall.noHitReason)}`);
   }
   lines.push("Inspect: /memory routing | /memory palace | /status runtime");
   lines.push(`Set: ${memoryInspectViews()}`);
@@ -515,16 +524,16 @@ function renderMemoryRoutingView(
     return lines.join("\n");
   }
   lines.push(`Last truth: ${memoryTruthModeLabel(lastRecall.truthMode ?? null)} (${lastRecall.truthModeSource ?? "inferred"})`);
-  if (lastRecall.truthProvenance?.length) lines.push(`Truth source: ${lastRecall.truthProvenance.join("+")}`);
-  lines.push(`Section order: ${lastRecall.sectionOrder?.join(">") || "none"}`);
-  lines.push(`Shown sections: ${lastRecall.shownSections?.join(">") || "none"}`);
-  lines.push(`Hidden sections: ${lastRecall.hiddenSections?.join(">") || "none"}`);
-  lines.push(`Empty sections: ${lastRecall.emptySections?.join(">") || "none"}`);
+  if (lastRecall.truthProvenance?.length) lines.push(`Truth source: ${formatMemorySurfaceList(lastRecall.truthProvenance, "+")}`);
+  lines.push(`Section order: ${formatMemorySurfaceList(lastRecall.sectionOrder, ">")}`);
+  lines.push(`Shown sections: ${formatMemorySurfaceList(lastRecall.shownSections, ">")}`);
+  lines.push(`Hidden sections: ${formatMemorySurfaceList(lastRecall.hiddenSections, ">")}`);
+  lines.push(`Empty sections: ${formatMemorySurfaceList(lastRecall.emptySections, ">")}`);
   lines.push(`Counts: exact ${lastRecall.exact?.shown ?? 0}/${lastRecall.exact?.total ?? 0} | compact ${lastRecall.compact?.shown ?? 0}/${lastRecall.compact?.total ?? 0} | structured ${lastRecall.structured?.shown ?? 0}/${lastRecall.structured?.total ?? 0}`);
   lines.push(`Palace counts: direct ${lastRecall.palace?.direct?.shown ?? 0}/${lastRecall.palace?.direct?.total ?? 0} | nearby ${lastRecall.palace?.nearby?.shown ?? 0}/${lastRecall.palace?.nearby?.total ?? 0} | broader ${lastRecall.palace?.broader?.shown ?? 0}/${lastRecall.palace?.broader?.total ?? 0} | related ${lastRecall.palace?.related?.shown ?? 0}/${lastRecall.palace?.related?.total ?? 0}`);
   lines.push(`Session scope: shown current ${lastRecall.sessionContribution?.shown?.current ?? 0} | shown archived ${lastRecall.sessionContribution?.shown?.archived ?? 0} | shown palace ${lastRecall.sessionContribution?.shown?.palace ?? 0}`);
   lines.push(`Session total: current ${lastRecall.sessionContribution?.total?.current ?? 0} | archived ${lastRecall.sessionContribution?.total?.archived ?? 0} | palace ${lastRecall.sessionContribution?.total?.palace ?? 0}`);
-  if (lastRecall.noHitReason) lines.push(`No-hit: ${lastRecall.noHitReason}`);
+  if (lastRecall.noHitReason) lines.push(`No-hit: ${redactMemorySurfaceText(lastRecall.noHitReason)}`);
   lines.push("Inspect: /memory | /memory palace | /status runtime");
   return lines.join("\n");
 }
@@ -543,13 +552,13 @@ function renderMemoryPalaceView(
     lines.push("Inspect: /memory | /memory routing");
     return lines.join("\n");
   }
-  lines.push(`Hinted path: ${lastRecall.palace.hintedPath ?? "none"}`);
-  lines.push(`Resolved path: ${lastRecall.palace.resolvedPath ?? "none"}`);
-  lines.push(`Resolved hall/wing/room: ${lastRecall.palace.path?.resolvedHall ?? "none"} | ${lastRecall.palace.path?.resolvedWing ?? "none"} | ${lastRecall.palace.path?.resolvedRoom ?? "none"}`);
-  lines.push(`Source hint/resolved: ${lastRecall.palace.path?.inferredSourceFile ?? "none"} | ${lastRecall.palace.path?.resolvedSourceFile ?? "none"}`);
-  lines.push(`Traversal: direct ${lastRecall.palace.traversal?.directHitStage ?? lastRecall.palace.traversal?.directMissStage ?? "none"} | nearby ${lastRecall.palace.traversal?.nearbySeed ?? "none"} via ${lastRecall.palace.traversal?.nearbySeedVia ?? lastRecall.palace.traversal?.nearbyUnavailable ?? "none"} | broader ${lastRecall.palace.traversal?.broaderSeed ?? "none"} via ${lastRecall.palace.traversal?.broaderSeedVia ?? lastRecall.palace.traversal?.broaderUnavailable ?? "none"} | related ${lastRecall.palace.traversal?.relatedSeed ?? "none"} via ${lastRecall.palace.traversal?.relatedHitStage ?? lastRecall.palace.traversal?.relatedMissStage ?? lastRecall.palace.traversal?.relatedUnavailable ?? "none"}`);
-  lines.push(`Fallbacks: hall ${lastRecall.palace.path?.hallFallback ?? "none"} | room ${lastRecall.palace.path?.roomFallback ?? "none"} | source ${lastRecall.palace.path?.sourceFallback ?? "none"} | nearby ${lastRecall.palace.traversal?.nearbyFallback ?? "none"} | broader ${lastRecall.palace.traversal?.broaderFallback ?? "none"} | related ${lastRecall.palace.traversal?.relatedFallback ?? "none"}`);
-  if (lastRecall.noHitReason) lines.push(`No-hit: ${lastRecall.noHitReason}`);
+  lines.push(`Hinted path: ${redactMemorySurfaceText(lastRecall.palace.hintedPath ?? "none")}`);
+  lines.push(`Resolved path: ${redactMemorySurfaceText(lastRecall.palace.resolvedPath ?? "none")}`);
+  lines.push(`Resolved hall/wing/room: ${redactMemorySurfaceText(lastRecall.palace.path?.resolvedHall ?? "none")} | ${redactMemorySurfaceText(lastRecall.palace.path?.resolvedWing ?? "none")} | ${redactMemorySurfaceText(lastRecall.palace.path?.resolvedRoom ?? "none")}`);
+  lines.push(`Source hint/resolved: ${redactMemorySurfaceText(lastRecall.palace.path?.inferredSourceFile ?? "none")} | ${redactMemorySurfaceText(lastRecall.palace.path?.resolvedSourceFile ?? "none")}`);
+  lines.push(`Traversal: direct ${redactMemorySurfaceText(lastRecall.palace.traversal?.directHitStage ?? lastRecall.palace.traversal?.directMissStage ?? "none")} | nearby ${redactMemorySurfaceText(lastRecall.palace.traversal?.nearbySeed ?? "none")} via ${redactMemorySurfaceText(lastRecall.palace.traversal?.nearbySeedVia ?? lastRecall.palace.traversal?.nearbyUnavailable ?? "none")} | broader ${redactMemorySurfaceText(lastRecall.palace.traversal?.broaderSeed ?? "none")} via ${redactMemorySurfaceText(lastRecall.palace.traversal?.broaderSeedVia ?? lastRecall.palace.traversal?.broaderUnavailable ?? "none")} | related ${redactMemorySurfaceText(lastRecall.palace.traversal?.relatedSeed ?? "none")} via ${redactMemorySurfaceText(lastRecall.palace.traversal?.relatedHitStage ?? lastRecall.palace.traversal?.relatedMissStage ?? lastRecall.palace.traversal?.relatedUnavailable ?? "none")}`);
+  lines.push(`Fallbacks: hall ${redactMemorySurfaceText(lastRecall.palace.path?.hallFallback ?? "none")} | room ${redactMemorySurfaceText(lastRecall.palace.path?.roomFallback ?? "none")} | source ${redactMemorySurfaceText(lastRecall.palace.path?.sourceFallback ?? "none")} | nearby ${redactMemorySurfaceText(lastRecall.palace.traversal?.nearbyFallback ?? "none")} | broader ${redactMemorySurfaceText(lastRecall.palace.traversal?.broaderFallback ?? "none")} | related ${redactMemorySurfaceText(lastRecall.palace.traversal?.relatedFallback ?? "none")}`);
+  if (lastRecall.noHitReason) lines.push(`No-hit: ${redactMemorySurfaceText(lastRecall.noHitReason)}`);
   lines.push("Inspect: /memory | /memory routing | /status runtime");
   return lines.join("\n");
 }

@@ -56,6 +56,17 @@ export interface LLMResponse {
   traceId: string;
   timestamp: string;
   rawResponse?: Record<string, unknown>;
+  /**
+   * Optional chain-of-thought / extended-thinking text from reasoning-capable
+   * models (e.g. Ollama `message.thinking` for Gemma 4 and similar; Anthropic
+   * `thinking` content blocks once wired). Populated additively — providers
+   * that don't surface a reasoning channel leave this undefined. Callers MUST
+   * NOT treat this as user-facing model output; it is for diagnostics and
+   * UX disclosure. The "verbatim canonical transcript" rule (Critical Rule 6)
+   * still applies — reasoning text passes through the same sanitizer path as
+   * content before durable persistence.
+   */
+  reasoning?: string;
 }
 
 export function createLLMResponse(
@@ -73,6 +84,7 @@ export function createLLMResponse(
     traceId: opts?.traceId ?? randomUUID().replace(/-/g, "").slice(0, 16),
     timestamp: opts?.timestamp ?? new Date().toISOString(),
     rawResponse: opts?.rawResponse,
+    reasoning: opts?.reasoning,
   };
 }
 

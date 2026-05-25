@@ -1,6 +1,6 @@
 import type { SlashCommandContext } from "./gateway-contract";
 import { doctorCheckPrefix } from "./gateway-doctor";
-import { scrubSecrets } from "./security/log-sanitizer";
+import { redactOperatorSurfaceText, redactOperatorSurfaceList } from "./operator-surface-redaction";
 
 export interface GatewayProviderCommandPayload {
   output: string;
@@ -217,9 +217,11 @@ function normalizeModelRef(value: string): string {
 }
 
 function redactProviderInput(value: string): string {
-  return scrubSecrets(value.trim())
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, "[REDACTED]");
+  return redactOperatorSurfaceText(value.trim());
+}
+
+function redactProviderList(values: string[]): string {
+  return redactOperatorSurfaceList(values, ", ", "(none)");
 }
 
 function normalizeProviderSelectionInput(value: string | undefined): string | null {
@@ -525,31 +527,32 @@ export function renderFocusedProviderFailoversView(opts: {
   outgoingFailovers: string[];
   recoveryHints: string[];
 }): string {
-  const lines = [`Provider Failovers: ${opts.provider}`, ""];
-  lines.push(`Configured model: ${opts.configuredModel}`);
-  lines.push(`Observed health: ${opts.observedState} (failures: ${opts.observedFailures})`);
+  const provider = redactProviderInput(opts.provider);
+  const lines = [`Provider Failovers: ${provider}`, ""];
+  lines.push(`Configured model: ${redactProviderInput(opts.configuredModel)}`);
+  lines.push(`Observed health: ${redactProviderInput(opts.observedState)} (failures: ${opts.observedFailures})`);
   lines.push(`Matched recent failovers: ${opts.matchedCount} of ${opts.totalRecentFailovers}`);
   lines.push("");
   lines.push("Recent incoming failovers:");
   if (opts.incomingFailovers.length === 0) {
-    lines.push(`  (No incoming failovers recorded for ${opts.provider})`);
+    lines.push(`  (No incoming failovers recorded for ${provider})`);
   } else {
-    for (const event of opts.incomingFailovers) lines.push(`  ${event}`);
+    for (const event of opts.incomingFailovers) lines.push(`  ${redactProviderInput(event)}`);
   }
   lines.push("");
   lines.push("Recent outgoing failovers:");
   if (opts.outgoingFailovers.length === 0) {
-    lines.push(`  (No outgoing failovers recorded for ${opts.provider})`);
+    lines.push(`  (No outgoing failovers recorded for ${provider})`);
   } else {
-    for (const event of opts.outgoingFailovers) lines.push(`  ${event}`);
+    for (const event of opts.outgoingFailovers) lines.push(`  ${redactProviderInput(event)}`);
   }
   if (opts.recoveryHints.length > 0) {
     lines.push("");
     lines.push("Recovery:");
-    for (const hint of opts.recoveryHints) lines.push(`- ${hint}`);
+    for (const hint of opts.recoveryHints) lines.push(`- ${redactProviderInput(hint)}`);
   }
   lines.push("");
-  lines.push(`Inspect: /provider ${opts.provider} | /provider perf ${opts.provider} | /provider health | /doctor ${opts.provider}`);
+  lines.push(`Inspect: /provider ${provider} | /provider perf ${provider} | /provider health | /doctor ${provider}`);
   return lines.join("\n");
 }
 
@@ -568,9 +571,9 @@ export function renderFocusedProviderPerfView(opts: {
   ambiguousModels: string[];
   unmappedModels: string[];
 }): string {
-  const lines = [`Provider Performance: ${opts.provider}`, ""];
-  lines.push(`Configured model: ${opts.configuredModel}`);
-  lines.push(`Mapped models: ${opts.mappedModels.length ? opts.mappedModels.join(", ") : "(none)"}`);
+  const lines = [`Provider Performance: ${redactProviderInput(opts.provider)}`, ""];
+  lines.push(`Configured model: ${redactProviderInput(opts.configuredModel)}`);
+  lines.push(`Mapped models: ${redactProviderList(opts.mappedModels)}`);
   if (opts.rows.length === 0) {
     lines.push("No timed model usage mapped to this provider yet.");
   } else {
@@ -585,16 +588,16 @@ export function renderFocusedProviderPerfView(opts: {
     lines.push("Per-model latency:");
     for (const row of opts.rows) {
       const average = row.callCount > 0 ? row.apiDurationS / row.callCount : 0;
-      lines.push(`  ${row.model}: ${row.apiDurationS.toFixed(1)}s total | ${row.callCount} calls | ${average.toFixed(2)}s/call`);
+      lines.push(`  ${redactProviderInput(row.model)}: ${row.apiDurationS.toFixed(1)}s total | ${row.callCount} calls | ${average.toFixed(2)}s/call`);
     }
   }
   if (opts.ambiguousModels.length > 0) {
     lines.push("");
-    lines.push(`Ambiguous models hidden: ${opts.ambiguousModels.join(", ")}`);
+    lines.push(`Ambiguous models hidden: ${opts.ambiguousModels.map(redactProviderInput).join(", ")}`);
   }
   if (opts.unmappedModels.length > 0) {
     lines.push("");
-    lines.push(`Unmapped timed models: ${opts.unmappedModels.join(", ")}`);
+    lines.push(`Unmapped timed models: ${opts.unmappedModels.map(redactProviderInput).join(", ")}`);
   }
   lines.push("");
   lines.push(`Inspect: ${providerInspectViews(opts.provider)}`);
@@ -631,23 +634,24 @@ export function renderProviderPerfView(opts: {
       lines.push(`Average API time: ${(totalApiTime / totalCalls).toFixed(2)}s/call`);
     }
     if (slowestAverage) {
-      lines.push(`Slowest average: ${slowestAverage.provider} | ${(slowestAverage.totalApiDurationS / slowestAverage.totalCalls).toFixed(2)}s/call`);
+      lines.push(`Slowest average: ${redactProviderInput(slowestAverage.provider)} | ${(slowestAverage.totalApiDurationS / slowestAverage.totalCalls).toFixed(2)}s/call`);
     }
-    lines.push(`Highest total: ${opts.timedProviders[0].provider} | ${opts.timedProviders[0].totalApiDurationS.toFixed(1)}s over ${opts.timedProviders[0].totalCalls} calls`);
+    lines.push(`Highest total: ${redactProviderInput(opts.timedProviders[0].provider)} | ${opts.timedProviders[0].totalApiDurationS.toFixed(1)}s over ${opts.timedProviders[0].totalCalls} calls`);
     lines.push("");
     lines.push("Per-provider latency:");
     for (const entry of opts.timedProviders) {
       const average = entry.totalCalls > 0 ? entry.totalApiDurationS / entry.totalCalls : 0;
-      lines.push(`  ${entry.provider}: ${entry.totalApiDurationS.toFixed(1)}s total | ${entry.totalCalls} calls | ${average.toFixed(2)}s/call${entry.models.length > 0 ? ` | ${entry.models.join(", ")}` : ""}`);
+      const models = entry.models.length > 0 ? ` | ${entry.models.map(redactProviderInput).join(", ")}` : "";
+      lines.push(`  ${redactProviderInput(entry.provider)}: ${entry.totalApiDurationS.toFixed(1)}s total | ${entry.totalCalls} calls | ${average.toFixed(2)}s/call${models}`);
     }
   }
   if (opts.ambiguousModels.length > 0) {
     lines.push("");
-    lines.push(`Ambiguous models hidden: ${opts.ambiguousModels.join(", ")}`);
+    lines.push(`Ambiguous models hidden: ${opts.ambiguousModels.map(redactProviderInput).join(", ")}`);
   }
   if (opts.unmappedModels.length > 0) {
     lines.push("");
-    lines.push(`Unmapped timed models: ${opts.unmappedModels.join(", ")}`);
+    lines.push(`Unmapped timed models: ${opts.unmappedModels.map(redactProviderInput).join(", ")}`);
   }
   lines.push("");
   lines.push(`Inspect: ${providerInspectViews()}`);
