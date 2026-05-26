@@ -253,10 +253,16 @@ expectThrow(
 // ---------------------------------------------------------------------------
 
 {
+  // The v2.0.0-alpha.0 release notes describe what THAT TAG ships, which is
+  // 387 phases. Phase 388 itself is post-tag tooling and is intentionally not
+  // counted as part of the alpha's verification frontier. If a future release
+  // adds its own docs/release/vX.Y.Z-suffix.md, the count claim there should
+  // match its tagged commit's verify:all chain length, not whatever main is
+  // currently at.
   const releaseNotes = await Bun.file("docs/release/v2.0.0-alpha.0.md").text();
   assert(
-    releaseNotes.includes("388-phase verification gate"),
-    "v2.0.0-alpha.0 release notes name the current 388-phase frontier",
+    releaseNotes.includes("387-phase verification gate"),
+    "v2.0.0-alpha.0 release notes name the 387-phase frontier shipped by that tag",
   );
 }
 
