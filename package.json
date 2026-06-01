@@ -485,7 +485,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@types/react": "^18.2.37",
+    "@types/react": "^19.2.15",
     "bun-types": "latest",
     "react-devtools-core": "^7.0.1",
     "typescript": "^5.2.2"
