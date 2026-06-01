@@ -42,6 +42,23 @@ const KNOWN_MODELS: ModelInfo[] = [
     supportsToolUse: true,
   },
   {
+    modelId: "claude-sonnet-4-6",
+    provider: "anthropic",
+    contextWindow: 200_000,
+    supportsStreaming: true,
+    supportsEmbedding: false,
+    supportsToolUse: true,
+  },
+  {
+    modelId: "claude-haiku-4-5-20251001",
+    provider: "anthropic",
+    contextWindow: 200_000,
+    supportsStreaming: true,
+    supportsEmbedding: false,
+    supportsToolUse: true,
+  },
+  // Legacy aliases — kept for backwards compatibility
+  {
     modelId: "claude-sonnet-4-5-20250929",
     provider: "anthropic",
     contextWindow: 200_000,
@@ -83,7 +100,7 @@ export class AnthropicProvider extends LLMProvider {
       opts?.apiBase ?? "https://api.anthropic.com"
     ).replace(/\/+$/, "");
     this._defaultModel =
-      opts?.defaultModel ?? "claude-sonnet-4-5-20250929";
+      opts?.defaultModel ?? "claude-sonnet-4-6";
     this._timeout = (opts?.timeout ?? 120) * 1000;
 
     if (!this._apiKey) {
@@ -353,18 +370,12 @@ export class AnthropicProvider extends LLMProvider {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const resp = await fetch(`${this._apiBase}/v1/messages`, {
-        method: "POST",
+      const resp = await fetch(`${this._apiBase}/v1/models`, {
+        method: "GET",
         headers: {
-          "Content-Type": "application/json",
           "x-api-key": this._apiKey,
           "anthropic-version": "2023-06-01",
         },
-        body: JSON.stringify({
-          model: this._defaultModel,
-          max_tokens: 1,
-          messages: [{ role: "user", content: "ping" }],
-        }),
         signal: AbortSignal.timeout(10000),
       });
       return resp.ok;

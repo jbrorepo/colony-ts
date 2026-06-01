@@ -1,0 +1,118 @@
+{
+  "version": "1",
+  "updated": "2026-05-29",
+  "schemaUrl": "https://jbrorepo.github.io/colony-ts/v1/schema.json",
+  "submitProcessUrl": "https://github.com/jbrorepo/colony-ts/blob/main/registry/SUBMITTING.md",
+  "plugins": [
+    {
+      "id": "colony-git",
+      "name": "Git Tools",
+      "description": "Git operations as Colony tools: status, diff, log, branch, commit, blame, stash. Honors caste-based RBAC so untrusted runs cannot rewrite history.",
+      "version": "1.0.0",
+      "author": "colony-team",
+      "tags": ["git", "version-control", "essential"],
+      "verified": true,
+      "source": "npm:@colony/plugin-git",
+      "homepageUrl": "https://github.com/colony-plugins/git"
+    },
+    {
+      "id": "colony-github",
+      "name": "GitHub",
+      "description": "GitHub API integration: list/create issues, open PRs, post review comments, fetch repo metadata. Uses fine-grained PATs with least-privilege scopes.",
+      "version": "1.2.0",
+      "author": "colony-team",
+      "tags": ["github", "git", "ci", "essential"],
+      "verified": true,
+      "source": "npm:@colony/plugin-github",
+      "homepageUrl": "https://github.com/colony-plugins/github"
+    },
+    {
+      "id": "colony-slack",
+      "name": "Slack",
+      "description": "Send messages, read channel history, react to threads. Useful for posting swarm run results or pulling support context.",
+      "version": "0.4.1",
+      "author": "colony-team",
+      "tags": ["slack", "chat", "integration"],
+      "verified": true,
+      "source": "npm:@colony/plugin-slack",
+      "homepageUrl": "https://github.com/colony-plugins/slack"
+    },
+    {
+      "id": "colony-browser",
+      "name": "Browser Automation",
+      "description": "Wraps the bundled BrowserSidecarRuntime as discoverable tools — navigate, click, type, wait, screenshot. Requires the browser sidecar to be running.",
+      "version": "1.0.0",
+      "author": "colony-team",
+      "tags": ["browser", "automation", "web-scraping"],
+      "verified": true,
+      "source": "npm:@colony/plugin-browser",
+      "homepageUrl": "https://github.com/colony-plugins/browser"
+    },
+    {
+      "id": "colony-jira",
+      "name": "Jira / Linear",
+      "description": "Read and update issues across Jira, Linear, and Asana. Standardizes ticket fields so swarm tasks can drive any tracker.",
+      "version": "0.3.0",
+      "author": "colony-team",
+      "tags": ["jira", "linear", "asana", "tickets", "integration"],
+      "verified": true,
+      "source": "npm:@colony/plugin-tickets",
+      "homepageUrl": "https://github.com/colony-plugins/tickets"
+    },
+    {
+      "id": "colony-http",
+      "name": "HTTP Client",
+      "description": "Make HTTP requests against allowlisted domains. Domains must be explicitly approved per-session; default-deny applies.",
+      "version": "1.1.0",
+      "author": "colony-team",
+      "tags": ["http", "api", "essential"],
+      "verified": true,
+      "source": "npm:@colony/plugin-http",
+      "homepageUrl": "https://github.com/colony-plugins/http"
+    },
+    {
+      "id": "colony-postgres",
+      "name": "PostgreSQL",
+      "description": "Read-only by default Postgres tools — describe schema, run SELECT, EXPLAIN. Write tools are gated behind sessions.write + an explicit policy rule.",
+      "version": "0.7.0",
+      "author": "colony-team",
+      "tags": ["postgres", "database", "sql"],
+      "verified": true,
+      "source": "npm:@colony/plugin-postgres",
+      "homepageUrl": "https://github.com/colony-plugins/postgres"
+    },
+    {
+      "id": "colony-filesystem-plus",
+      "name": "Filesystem Plus",
+      "description": "Advanced filesystem ops beyond built-ins: recursive search, rename-with-refactor, batch-edit. All operations validated against PathValidator.",
+      "version": "0.5.0",
+      "author": "colony-team",
+      "tags": ["filesystem", "refactor", "essential"],
+      "verified": true,
+      "source": "npm:@colony/plugin-filesystem-plus",
+      "homepageUrl": "https://github.com/colony-plugins/filesystem-plus"
+    },
+    {
+      "id": "colony-web-search",
+      "name": "Web Search",
+      "description": "Search the web using configurable providers (Brave, DuckDuckGo, Tavily). API keys are stored in the session-scoped vault.",
+      "version": "0.2.0",
+      "author": "colony-team",
+      "tags": ["search", "web", "research"],
+      "verified": true,
+      "source": "npm:@colony/plugin-web-search",
+      "homepageUrl": "https://github.com/colony-plugins/web-search"
+    },
+    {
+      "id": "colony-ollama-bridge",
+      "name": "Ollama Bridge",
+      "description": "Helper tools for managing local Ollama models — list, pull, delete, switch. Useful for caste configurations that mix local and cloud models.",
+      "version": "0.3.0",
+      "author": "colony-team",
+      "tags": ["ollama", "local", "models"],
+      "verified": true,
+      "source": "npm:@colony/plugin-ollama-bridge",
+      "homepageUrl": "https://github.com/colony-plugins/ollama-bridge"
+    }
+  ]
+}

@@ -1,105 +1,181 @@
 # The Colony
 
-The Colony is a local-first, security-first TypeScript/Bun agent runtime. Launch Alpha 0 is a public source checkout alpha centered on a real planner -> worker -> reviewer swarm path, conservative approvals, exact transcript truth, and Ollama-first provider setup.
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen)](.github/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@colony/cli.svg)](https://npmjs.com/package/@colony/cli)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-251%20passing-brightgreen)](src/__tests__)
 
-Alpha 0 also exposes 12-caste method framework display compatibility while keeping legacy persisted caste values as compatibility aliases.
+> **A local-first, security-first agent runtime.**
+> Caste-based RBAC, default-deny tool execution, MCP-native, runs entirely on your machine.
+
+The Colony is the agent runtime your security team will actually approve.
+It combines a strict default-deny security policy, role-based caste
+permissions, exact-call approval gates, and a full audit trail with the
+modern surface you'd expect: REST API, web dashboard, VS Code extension,
+MCP server registry, and pluggable LLM providers (Anthropic, OpenAI,
+Gemini, Ollama).
+
+---
+
+## Why Colony
+
+|  | Colony | Most agent CLIs |
+|---|---|---|
+| Local-first | ✓ Runs against Ollama, no cloud required | Cloud-first |
+| Default-deny security | ✓ 7-caste RBAC + path validator | Permissive defaults |
+| Audit trail | ✓ Capped evaluation log + signed approvals | Optional |
+| MCP first-class | ✓ Registry, CRUD, CLI, REST | Stdio config files |
+| Pluggable sandbox | ✓ `HostToolExecutor` / `DockerToolExecutor` | Host-only |
+| Vendor SDKs | None — pure `fetch` | Many |
+| Editor presence | VS Code extension v0.2 | Most are CLI-only or IDE-only |
+| Async/detached runs | ✓ `POST /api/v1/swarm/runs` returns `runId` | Usually blocking |
+
+---
 
 ## Install
 
-```powershell
+### One-liner (recommended for trying it out)
+
+```bash
+npm install -g @colony/cli
+colony --help
+```
+
+Requires Node.js 18+ to bootstrap, and [Bun](https://bun.sh) 1.1+ for
+the actual runtime. The `colony` shim auto-detects Bun and gives a clear
+install hint if it's missing.
+
+### From source
+
+```bash
+git clone https://github.com/jbrorepo/colony-ts.git
+cd colony
 bun install
-bun run verify:alpha0
-bun run alpha0:provider-check
 bun run start
 ```
 
-The source+Bun path is the Alpha 0 release path. `bun run build` can compile a local executable, but the alpha does not require a prebuilt binary.
+---
 
-## Provider Setup
+## 60-second tour
 
-Ollama is the default local provider:
+```bash
+# 1. Start a chat (uses Ollama by default — no API key needed)
+colony
 
-```powershell
-ollama serve
-ollama pull llama3.2
+# 2. Configure a cloud provider
+export ANTHROPIC_API_KEY=sk-ant-...
+colony --provider anthropic --model claude-sonnet-4-6
+
+# 3. Run a swarm
+> /swarm Refactor src/util/parse.ts for null-safety
+
+# 4. From another terminal, start the daemon + dashboard
+colony daemon
+# → Dashboard at http://127.0.0.1:7878
+# → REST API at http://127.0.0.1:7878/api/v1/*
 ```
 
-Optional cloud fallback providers are enabled with environment variables:
+See [`documentation/quickstart.md`](documentation/quickstart.md) for the
+full walkthrough.
 
-```powershell
-$env:ANTHROPIC_API_KEY="..."
-$env:OPENAI_API_KEY="..."
-$env:GEMINI_API_KEY="..."
+---
+
+## What you get
+
+| Surface | What it does |
+|---|---|
+| **Terminal chat (Ink TUI)** | Streaming, approval prompts, slash commands, session navigation, hotkey reference (`?`) |
+| **Daemon REST API** | `/sessions`, `/swarm/runs`, `/diffs/preview`, `/mcp/servers`, `/health` (see [`documentation/rest-api.md`](documentation/rest-api.md)) |
+| **Web dashboard** | Health, session list, inline diff renderer, MCP server list — embedded HTML, no build step |
+| **VS Code extension** | 9 commands, daemon health status bar, swarm-run launcher, diff preview (see [`vscode-extension/README.md`](vscode-extension/README.md)) |
+| **Swarm runtime** | planner → worker → reviewer with semaphore-gated concurrency and detached mode |
+| **MCP server registry** | `/mcp` CLI + REST CRUD + persistent config at `~/.colony/mcp-servers.json` |
+| **Plugin search** | `/plugins search <term>` against the hosted registry (or your own) |
+| **Pluggable sandbox** | Host (default) or Docker; `ToolExecutor` interface for custom backends |
+| **MemPalace** | 4-layer memory: L0 identity, L1 working, L2 episodic, L3 semantic |
+
+---
+
+## Documentation
+
+| | |
+|---|---|
+| **[Quickstart](documentation/quickstart.md)** | Install → first message → first swarm |
+| **[Comparison vs Cursor/Aider/Cline/Devin](documentation/comparison.md)** | Honest matrix + when to choose what |
+| **[Configuration](documentation/configuration.md)** | Env vars, providers, config file |
+| **[Security model](documentation/security.md)** | Caste RBAC, approval gates, path validator |
+| **[REST API reference](documentation/rest-api.md)** | All `/api/v1/*` endpoints |
+| **[CLI reference](documentation/cli.md)** | Every slash command |
+| **[Architecture](documentation/architecture.md)** | Module map, runtime, MemPalace |
+| **[MCP server guide](documentation/mcp.md)** | Registry, trust model, CLI + REST |
+| **[Plugin author guide](documentation/plugins.md)** | Submission, manifest, security |
+| **[VS Code extension](documentation/vscode.md)** | Setup, commands, settings |
+| **[Swarm runs](documentation/swarm.md)** | Detached mode, monitoring, cancellation |
+| **[Sandbox / Docker](documentation/sandbox.md)** | `ToolExecutor` + Docker backend |
+| **[Benchmarks](documentation/benchmarks.md)** | Reproducing SWE-bench numbers |
+| **[Troubleshooting](documentation/troubleshooting.md)** | Common errors |
+
+---
+
+## Security posture
+
+Colony is built for environments where the security team can veto any
+agent feature. The defaults reflect that:
+
+- **Default-deny:** unknown actor + unknown action + unknown resource =
+  denied with a logged reason.
+- **Caste RBAC:** every actor has a caste; every caste has explicit
+  allow/deny rules. `nameless_swarm` is the lowest tier (read-only file
+  ops); `root_queen` allows anything (intended only for the operator).
+- **Path validator:** every filesystem op is checked for null-byte
+  injection, directory traversal, symlink escape, and reserved-path
+  hits before execution.
+- **Approval gates:** mutating tool calls require operator approval.
+  "Allow this exact call this session" persists the approval scoped to
+  the call signature, not the tool.
+- **Audit trail:** every policy evaluation is logged to a capped ring
+  buffer (default 5000 entries); every approval is signed.
+- **No vendor SDKs:** all LLM providers use raw `fetch`. Smaller attack
+  surface, easier audit.
+
+See [`documentation/security.md`](documentation/security.md) for the full
+threat model.
+
+---
+
+## Development
+
+```bash
+bun install
+bun test              # 251 unit tests, ~3 seconds
+bun run tsc --noEmit  # type-check
+bun run start         # dev TUI
+bun run dev           # TUI with file watcher
 ```
 
-All providers use raw `fetch()` in the runtime. Vendor SDKs are not required.
+CI runs on every push (`.github/workflows/ci.yml`):
+- `bun test --reporter=verbose`
+- `bun run tsc --noEmit` against Ubuntu latest + Bun latest
 
-## First Run
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for branch + PR conventions.
 
-Start the terminal UI:
+---
 
-```powershell
-bun run start
-```
+## Roadmap
 
-Useful first commands:
+Tracked in:
+- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — P0–P3 platform work (all closed)
+- [`COMPETITIVE_GAPS_PLAN.md`](COMPETITIVE_GAPS_PLAN.md) — competitive parity (all closed)
+- [`DISTRIBUTION_PLAN.md`](DISTRIBUTION_PLAN.md) — npm publish + docs + GitHub Pages
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — long-arc vision
 
-```text
-/doctor first-run
-/provider
-/workspace
-/swarm llm "draft a small local-first release note"
-/swarm status
-```
+---
 
-`bun run alpha0:provider-check` is a local readiness preflight. It checks Ollama
-reachability/model availability and whether optional cloud-provider env vars are
-present, without printing credential values. It does not replace the manual
-`/swarm llm` demo smoke.
+## License
 
-`/swarm llm <objective>` requests the real model-backed Alpha 0 swarm path when provider configuration is available. `/swarm <objective>` remains the coordinator-only compatibility path.
+[MIT](LICENSE) © The Colony Project contributors
 
-## Alpha 0 Boundaries
+---
 
-Shipped in Alpha 0:
-
-- local source+Bun install path
-- Ollama-first provider setup, with optional cloud fallback
-- real AgentLoop-backed swarm execution for plan, execute, and review stages
-- durable swarm status, resume, retry, and cancellation surfaces
-- 12-caste method framework display compatibility; legacy persisted caste values remain compatibility aliases
-- local-first GitHub issue/branch/worktree handoff planning behind approvals
-- local-only web-control mutation handoff guardrails
-
-Not shipped as default Alpha 0 behavior:
-
-- public hosted control plane
-- Slack, Discord, or Telegram delivery as a default alpha channel
-- credential persistence for external services
-- automatic push or PR creation
-- autonomous remote mutation without explicit approval
-- destructive caste renames or persisted session migration requirements
-
-## Verification
-
-For the current built/not-built truth, see `docs/PROJECT_STATE.md`.
-
-Run the alpha gate before sharing the project:
-
-```powershell
-bun run verify:alpha0
-```
-
-Run the full development gate before larger release claims:
-
-```powershell
-bun run verify:all
-bun run build
-```
-
-## Troubleshooting
-
-- If `/doctor first-run` reports provider errors, start Ollama or configure one cloud provider key.
-- If a swarm run fails, inspect it with `/swarm status <run_id>`.
-- If a stage fails after a transient model error, retry it with `/swarm retry <run_id> <plan|execute|review>`.
-- If a run was restored from disk, continue it with `/swarm resume <run_id>`.
+> Alpha 0 launch notes (preserved for internal continuity):
+> see [`docs/ALPHA0_LAUNCH_README.md`](docs/ALPHA0_LAUNCH_README.md).

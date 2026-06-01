@@ -1,0 +1,40 @@
+version: 2
+
+updates:
+  # Main project (npm)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      types:
+        patterns: ["@types/*"]
+      bun:
+        patterns: ["bun*"]
+    labels:
+      - "dependencies"
+
+  # VS Code extension
+  - package-ecosystem: "npm"
+    directory: "/vscode-extension"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    groups:
+      types:
+        patterns: ["@types/*"]
+    labels:
+      - "dependencies"
+      - "vscode-extension"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "ci"

@@ -13,6 +13,7 @@ import {
 import type {
   WorkflowAutomationStartTemplateCommand,
 } from "../workflow";
+import { handleWebUIRequest } from "./web-ui";
 
 export interface DaemonHttpTransportOptions {
   path?: string;
@@ -24,6 +25,8 @@ export interface DaemonHttpServerOptions extends DaemonHttpTransportOptions {
   host: DaemonControlPlaneHost;
   hostname?: string;
   port?: number;
+  /** When true, GET / and GET /api/v1/* serve the browser dashboard. Default: true. */
+  webUI?: boolean;
 }
 
 export interface DaemonControlPlaneClientOptions extends DaemonHttpTransportOptions {
@@ -97,6 +100,7 @@ export class DaemonHttpControlPlaneServer {
   private readonly _path: string;
   private readonly _authToken?: string;
   private readonly _authPolicy?: DaemonAuthPolicy;
+  private readonly _webUI: boolean;
   private _server: ReturnType<typeof Bun.serve> | null = null;
 
   constructor(options: DaemonHttpServerOptions) {
@@ -106,6 +110,7 @@ export class DaemonHttpControlPlaneServer {
     this._path = options.path ?? DEFAULT_DAEMON_HTTP_PATH;
     this._authToken = options.authToken;
     this._authPolicy = options.authPolicy;
+    this._webUI = options.webUI !== false; // default: true
   }
 
   get url(): string {
@@ -113,16 +118,33 @@ export class DaemonHttpControlPlaneServer {
     return `http://${this._server.hostname}:${this._server.port}${this._path}`;
   }
 
+  /** Base URL without the control-plane path — for opening in a browser. */
+  get baseUrl(): string {
+    if (!this._server) throw new Error("Daemon HTTP server is not started");
+    return `http://${this._server.hostname}:${this._server.port}`;
+  }
+
   async start(): Promise<void> {
     if (this._server) return;
+    const host = this._host;
+    const path = this._path;
+    const authToken = this._authToken;
+    const authPolicy = this._authPolicy;
+    const webUI = this._webUI;
+
     this._server = Bun.serve({
       hostname: this._hostname,
       port: this._port,
-      fetch: (request) => handleDaemonHttpRequest(this._host, request, {
-        path: this._path,
-        authToken: this._authToken,
-        authPolicy: this._authPolicy,
-      }),
+      fetch: async (request) => {
+        // Web UI routes: GET / always served; GET /api/v1/* gated by web.read
+        // when an authPolicy is configured on the server.
+        if (webUI) {
+          const webUIResponse = await handleWebUIRequest(host, request, { authPolicy });
+          if (webUIResponse !== null) return webUIResponse;
+        }
+        // Control-plane (POST /api/daemon)
+        return handleDaemonHttpRequest(host, request, { path, authToken, authPolicy });
+      },
     });
   }
 

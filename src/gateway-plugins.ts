@@ -6,10 +6,13 @@ import {
   type TrustedPluginActivationReceipt,
 } from "./mcp/trusted-local-plugin-activation";
 import { scrubSecrets } from "./security/log-sanitizer";
+import { DEFAULT_REGISTRY_URL } from "./mcp/plugin-registry-client";
 
 export interface GatewayPluginsContext {
   entries?: TrustedLocalPluginEntry[];
   receipts?: TrustedPluginActivationReceipt[];
+  /** Override the default plugin registry URL for the `search` subcommand. */
+  registryUrl?: string;
 }
 
 export function buildPluginsCommandPayload(args: string[], context: GatewayPluginsContext = {}): GatewayBasicCommandPayload {
@@ -96,6 +99,18 @@ export function buildPluginsCommandPayload(args: string[], context: GatewayPlugi
       },
     };
   }
+  if (command === "search") {
+    const query = (args[1] ?? "").trim();
+    const registryUrl = context.registryUrl ?? DEFAULT_REGISTRY_URL;
+    return {
+      output: query
+        ? `Searching plugin registry for "${scrubPluginSurfaceText(query).slice(0, 80)}"...`
+        : "Fetching plugin registry index...",
+      data: { action: "plugins_search_pending", query, registryUrl },
+      action: { kind: "plugin_search", query, registryUrl },
+    };
+  }
+
   if (command !== "status") {
     return unknownPluginCommand(command);
   }
@@ -166,8 +181,8 @@ function unknownPluginCommand(command: string): GatewayBasicCommandPayload {
     output: [
       `Unknown plugins command '${command}'.`,
       "",
-      "Usage: /plugins [status [id]|trusted|preflight <id>|activate <id> --approved|deactivate <id> --approved]",
-      "Next valid command: /plugins trusted | /plugins preflight <id>",
+      "Usage: /plugins [status [id]|trusted|search [term]|preflight <id>|activate <id> --approved|deactivate <id> --approved]",
+      "Next valid command: /plugins search | /plugins trusted | /plugins preflight <id>",
     ].join("\n"),
     isError: true,
     data: { action: "plugins_usage" },

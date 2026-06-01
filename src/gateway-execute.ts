@@ -13,6 +13,10 @@ import {
 import type { CommandResult } from "./gateway-contract";
 import type { CompactionStrategy } from "./runtime/compaction";
 import type { SessionHistoryExcerpt } from "./runtime/session-recovery";
+import {
+  searchPluginRegistry,
+  formatPluginSearchResults,
+} from "./mcp/plugin-registry-client";
 import { getDataPath, settings } from "./settings";
 
 const ARTIFACT_VIEW_CHARS = 4_000;
@@ -240,6 +244,12 @@ export interface CommandExecutionHandlers {
   createGitHubPullRequest?: (runId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   activatePlugin?: (pluginId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   deactivatePlugin?: (pluginId: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
+  /**
+   * Search the hosted plugin registry. Receives the raw query string and the
+   * registry URL. If not provided, the default implementation queries the
+   * Colony hosted registry directly.
+   */
+  searchPlugin?: (query: string, registryUrl?: string) => Promise<string | CommandResult | void> | string | CommandResult | void;
   showArtifactCatalog?: (
     sessionId: string,
     latest?: boolean,
@@ -517,6 +527,31 @@ export async function executeCommand(
       handlers.showSystemMessage(command.output);
       await runOptionalHandoff("Plugin deactivation", handlers.deactivatePlugin ? () => handlers.deactivatePlugin?.(action.pluginId) : undefined, handlers);
       return true;
+
+    case "plugin_search": {
+      handlers.showSystemMessage(command.output);
+      const query = String(action.query ?? "");
+      const registryUrl = action.registryUrl ? String(action.registryUrl) : undefined;
+
+      if (handlers.searchPlugin) {
+        await runOptionalHandoff(
+          "Plugin registry search",
+          () => handlers.searchPlugin?.(query, registryUrl),
+          handlers,
+        );
+      } else {
+        // Default implementation: query the hosted registry directly.
+        try {
+          const result = await searchPluginRegistry(query, { registryUrl });
+          handlers.showSystemMessage(formatPluginSearchResults(result, query));
+        } catch (err) {
+          handlers.showErrorMessage(
+            `Plugin search failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      return true;
+    }
 
     case "show_artifact": {
       handlers.showSystemMessage(command.output);

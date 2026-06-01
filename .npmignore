@@ -1,0 +1,48 @@
+# Files explicitly excluded from the npm tarball.
+# Layered on top of package.json `files` — anything matched here is
+# removed even if `files` would have included it.
+
+# Test infrastructure — runtime users don't need it
+src/__tests__/**
+src/verify-*.ts
+src/verify-phase*.ts
+src/alpha0-*.ts
+src/web-control.ts
+
+# Internal team docs (separate from user-facing documentation/)
+docs/**
+README.alpha0.md
+
+# Plans / project-management docs
+IMPLEMENTATION_PLAN.md
+COMPETITIVE_GAPS_PLAN.md
+DISTRIBUTION_PLAN.md
+PUBLISHING.md
+CONTRIBUTING.md
+
+# Build + dev artifacts
+.tmp-*/
+.tmp/
+node_modules/
+bun.lockb
+*.tsbuildinfo
+.DS_Store
+
+# CI + VCS infrastructure
+.github/**
+.gitignore
+.gitattributes
+
+# Editor / IDE
+.vscode/**
+.idea/**
+.cursor/**
+*.swp
+*.swo
+
+# The vscode-extension publishes separately
+vscode-extension/**
+
+# Test outputs
+benchmarks/results.json
+coverage/**

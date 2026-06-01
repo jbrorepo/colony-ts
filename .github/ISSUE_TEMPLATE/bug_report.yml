@@ -1,0 +1,100 @@
+name: 🐛 Bug report
+description: Something Colony does that you didn't expect.
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please don't use this
+        form for security issues — see [SECURITY.md](../SECURITY.md)
+        for the responsible-disclosure path.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: "When I run `colony swarm <objective>`, the planner stage immediately fails with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "The planner should produce a task list, then the worker should execute."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Minimum steps for someone else to reproduce.
+      placeholder: |
+        1. `npm install -g @colony/cli@2.0.0`
+        2. `export ANTHROPIC_API_KEY=...`
+        3. `colony --provider anthropic`
+        4. Type `/swarm test`
+        5. Observe error
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Colony version
+      description: Output of `colony --version`
+      placeholder: "@colony/cli@2.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      multiple: true
+      options:
+        - CLI (terminal TUI)
+        - Daemon REST API
+        - Web dashboard
+        - VS Code extension
+        - Plugin / MCP server
+        - Documentation
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 / macOS 14.5 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: bun
+    attributes:
+      label: Bun version
+      description: Output of `bun --version`
+      placeholder: "1.1.30"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: |
+        Paste relevant output here. Remove any tokens or secrets first —
+        the log sanitizer is best-effort but you should still check.
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched [existing issues](https://github.com/jbrorepo/colony-ts/issues?q=is%3Aissue) and this isn't a duplicate
+          required: true
+        - label: I have removed any tokens / API keys from the logs above
+          required: true

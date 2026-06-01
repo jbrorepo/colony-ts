@@ -40,6 +40,7 @@ export type CommandAction =
   | { kind: "github_pr_create"; runId: string; approved: true }
   | { kind: "plugin_activate"; pluginId: string; approved: true }
   | { kind: "plugin_deactivate"; pluginId: string; approved: true }
+  | { kind: "plugin_search"; query: string; registryUrl?: string }
   | { kind: "show_artifact"; filepath: string }
   | { kind: "show_artifact_catalog"; sessionId: string; latest?: boolean }
   | { kind: "set_budget"; maxUsd: number }

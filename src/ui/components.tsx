@@ -623,6 +623,7 @@ export const ApprovalPrompt = React.memo(function ApprovalPrompt({
       : request.riskLevel === "medium"
         ? COLORS.warning
         : COLORS.success;
+
   const detailLines = request.details
     .split("\n")
     .map((line) => line.trim())
@@ -632,34 +633,68 @@ export const ApprovalPrompt = React.memo(function ApprovalPrompt({
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={riskColor} paddingX={1}>
+      {/* ── Header ── */}
       <Box>
-        <Text color={riskColor} bold>Approval required</Text>
-        <Text color={COLORS.muted}> | </Text>
-        <Text color={riskColor}>{request.riskLevel}</Text>
-        <Text color={COLORS.muted}> | </Text>
-        <Text color={COLORS.accent}>{request.toolName}</Text>
+        <Text color={riskColor} bold>⚠ Approval required</Text>
+        <Text color={COLORS.muted}> │ </Text>
+        <Text color={riskColor} bold>{request.riskLevel.toUpperCase()}</Text>
+        <Text color={COLORS.muted}> │ </Text>
+        <Text color={COLORS.accent} bold>{request.toolName}</Text>
       </Box>
+
+      {/* ── Summary + metadata ── */}
       <Text color={COLORS.user}>{request.summary}</Text>
-      <Text color={COLORS.muted}>category: {request.category}</Text>
-      <Text color={COLORS.muted}>reason: {request.reason}</Text>
-      <Text color={COLORS.muted}>session allow matches this exact signature only</Text>
-      <Text color={COLORS.muted}>signature: {request.signature}</Text>
+      <Box marginTop={0}>
+        <Text color={COLORS.muted}>category: </Text>
+        <Text color={COLORS.muted}>{request.category}</Text>
+        <Text color={COLORS.muted}>  reason: </Text>
+        <Text color={COLORS.muted}>{request.reason}</Text>
+      </Box>
+      <Text color={COLORS.muted}>
+        sig: {request.signature}{"  "}
+        <Text color={COLORS.muted}>(session-allow matches this exact call only)</Text>
+      </Text>
+
+      {/* ── Details ── */}
       {detailLines.map((line, index) => (
         <Text key={`${request.requestId}-detail-${index}`} color={COLORS.muted} wrap="wrap">
           {line}
         </Text>
       ))}
+
+      {/* ── Warnings ── */}
       {request.warnings.map((warning) => (
-        <Text key={warning} color={COLORS.warning}>warning: {warning}</Text>
+        <Text key={warning} color={COLORS.warning}>⚠ {warning}</Text>
       ))}
+
+      {/* ── Action list ── */}
+      <Box flexDirection="column" marginTop={1}>
+        <Text color={COLORS.muted}>─── Actions ────────────────────────────────</Text>
+        <Box>
+          <Text color={COLORS.success} bold>  [Y] </Text>
+          <Text color={COLORS.success}>Allow once</Text>
+        </Box>
+        <Box>
+          <Text color="greenBright" bold>  [A] </Text>
+          <Text color="greenBright">Allow this exact call for the rest of this session</Text>
+        </Box>
+        <Box>
+          <Text color={COLORS.accent} bold>  [S] </Text>
+          <Text color={COLORS.accent}>Inspect call details</Text>
+        </Box>
+        <Box>
+          <Text color={COLORS.error} bold>  [N] </Text>
+          <Text color={COLORS.error}>Deny</Text>
+        </Box>
+        <Box>
+          <Text color="redBright" bold>  [Esc] </Text>
+          <Text color="redBright">Cancel run</Text>
+        </Box>
+      </Box>
+
+      {/* ── Scroll hint ── */}
       <Text color={COLORS.muted}>
-        Input paused while approval prompt is active.
-      </Text>
-      <Text color={COLORS.muted}>
-        Transcript scroll still works: PgUp older | PgDn newer | Ctrl+L latest
-      </Text>
-      <Text color={COLORS.muted}>
-        y allow once | n deny | a allow exact call this session | s inspect details | esc cancel run
+        PgUp/PgDn scroll transcript │ Ctrl+L jump to bottom
       </Text>
     </Box>
   );

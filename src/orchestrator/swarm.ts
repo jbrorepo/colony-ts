@@ -22,6 +22,7 @@ import {
   type WorkflowRun,
   type WorkflowStore,
 } from "../workflow";
+import { MemoryWorkflowStore } from "../workflow/memory-store";
 
 export type SwarmRunStatus = "running" | "completed" | "failed" | "cancelled";
 export type SwarmExecutionMode = "coordinator_only" | "llm";
@@ -124,6 +125,19 @@ export interface StartSwarmObjectiveOptions {
   maxAttempts?: number;
   approvalRequired?: boolean;
   requiredApprover?: string;
+  /**
+   * When true (and executionMode === "llm"), startObjective() returns the
+   * initial snapshot immediately and kicks off the stage loop in the
+   * background. Callers poll via inspectRun() or subscribe to events.
+   *
+   * Required for any caller that wants Devin-style "submit a task, walk
+   * away" autonomy — Slack bots, Linear integrations, the REST API,
+   * etc. Without this flag startObjective() awaits the full plan→
+   * execute→review cycle which can take minutes.
+   *
+   * Default: false (preserves the existing blocking contract).
+   */
+  detached?: boolean;
 }
 
 export interface SwarmRunSnapshot {
@@ -161,6 +175,11 @@ export interface ColonySwarmRuntimeOptions {
   coordinator?: ColonyCoordinator;
   store?: SwarmRunStore;
   llmRunner?: SwarmStageRunner;
+  /**
+   * Maximum number of swarm runs that may execute LLM stages concurrently.
+   * Additional runs queue and start as slots free up.  Defaults to 4.
+   */
+  maxConcurrentRuns?: number;
 }
 
 interface SwarmRunRecord {
@@ -183,12 +202,42 @@ export class ColonySwarmRuntime {
   private readonly _persistedSnapshots = new Map<string, SwarmRunSnapshot>();
   private readonly _store?: SwarmRunStore;
   private readonly _llmRunner?: SwarmStageRunner;
+  private readonly _maxConcurrentRuns: number;
+  private _activeRunCount = 0;
+  private readonly _runQueue: Array<() => void> = [];
 
   constructor(options: ColonySwarmRuntimeOptions = {}) {
     this.registry = options.registry ?? new DefaultColonyAgentRegistry();
     this.coordinator = options.coordinator ?? new ColonyCoordinator({ registry: this.registry });
     this._store = options.store;
     this._llmRunner = options.llmRunner;
+    this._maxConcurrentRuns = Math.max(1, options.maxConcurrentRuns ?? 4);
+  }
+
+  // ── Concurrency semaphore ──────────────────────────────────────────────────
+
+  /**
+   * Acquire a slot in the run-concurrency semaphore.  Callers await this
+   * before entering `_runLlmStages`; they must call `_releaseRunSlot` in a
+   * `finally` block to unblock the next queued run.
+   */
+  private _acquireRunSlot(): Promise<void> {
+    if (this._activeRunCount < this._maxConcurrentRuns) {
+      this._activeRunCount++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this._runQueue.push(resolve);
+    });
+  }
+
+  private _releaseRunSlot(): void {
+    this._activeRunCount = Math.max(0, this._activeRunCount - 1);
+    const next = this._runQueue.shift();
+    if (next) {
+      this._activeRunCount++;
+      next();
+    }
   }
 
   async startObjective(options: StartSwarmObjectiveOptions): Promise<SwarmRunSnapshot> {
@@ -280,6 +329,21 @@ export class ColonySwarmRuntime {
     let snapshot = this._snapshot(run);
     await this._saveSnapshot(snapshot);
     if (executionMode === "llm") {
+      if (options.detached) {
+        // Kick off stage execution in the background; return the initial
+        // snapshot so the caller can poll via inspectRun(runId).
+        // Errors are swallowed here — they're surfaced in the snapshot's
+        // stage status. Tests can subscribe via events to assert behaviour.
+        void this._runLlmStages(run).catch((err) => {
+          // The runtime already records stage failures in the snapshot.
+          // This catch only prevents unhandledRejection logging when a
+          // background run blows up; the run's state remains observable
+          // through the snapshot.
+          // eslint-disable-next-line no-console
+          console.error(`[swarm:${run.runId}] background run failed:`, err);
+        });
+        return snapshot;
+      }
       snapshot = await this._runLlmStages(run);
     }
     return snapshot;
@@ -381,93 +445,98 @@ export class ColonySwarmRuntime {
       return snapshot;
     }
 
-    for (const stage of SWARM_STAGE_ORDER.slice(SWARM_STAGE_ORDER.indexOf(fromStage))) {
-      const existing = run.stages.get(stage);
-      if (existing?.status === "completed") continue;
-      const task = this._stageTask(run.executionId, stage);
-      const worker = task?.assignedWorkerId ? this.registry.inspectWorker(task.assignedWorkerId) ?? undefined : undefined;
-      const attempt = (existing?.attempts ?? 0) + 1;
-      const attemptLimit = explicitRetry ? MANUAL_RETRY_ATTEMPT_LIMIT : run.maxAttempts;
-      if (attempt > attemptLimit) {
-        markRunStageFailure(run, stage, `Swarm stage ${stage} exceeded ${attemptLimit} attempts`);
-        if (task?.assignedWorkerId) this.coordinator.failTask(task.taskId, task.assignedWorkerId, `Swarm stage ${stage} exceeded ${attemptLimit} attempts`);
-        this.coordinator.collectFanIn(run.executionId);
-        const snapshot = this._snapshot(run);
-        await this._saveSnapshot(snapshot);
-        return snapshot;
-      }
+    await this._acquireRunSlot();
+    try {
+      for (const stage of SWARM_STAGE_ORDER.slice(SWARM_STAGE_ORDER.indexOf(fromStage))) {
+        const existing = run.stages.get(stage);
+        if (existing?.status === "completed") continue;
+        const task = this._stageTask(run.executionId, stage);
+        const worker = task?.assignedWorkerId ? this.registry.inspectWorker(task.assignedWorkerId) ?? undefined : undefined;
+        const attempt = (existing?.attempts ?? 0) + 1;
+        const attemptLimit = explicitRetry ? MANUAL_RETRY_ATTEMPT_LIMIT : run.maxAttempts;
+        if (attempt > attemptLimit) {
+          markRunStageFailure(run, stage, `Swarm stage ${stage} exceeded ${attemptLimit} attempts`);
+          if (task?.assignedWorkerId) this.coordinator.failTask(task.taskId, task.assignedWorkerId, `Swarm stage ${stage} exceeded ${attemptLimit} attempts`);
+          this.coordinator.collectFanIn(run.executionId);
+          const snapshot = this._snapshot(run);
+          await this._saveSnapshot(snapshot);
+          return snapshot;
+        }
 
-      if (task?.awaitingApproval) {
+        if (task?.awaitingApproval) {
+          run.stages.set(stage, {
+            ...stageSnapshotForTask(stage, task, existing),
+            status: "awaiting_approval",
+            attempts: existing?.attempts ?? 0,
+            awaitingApproval: { ...task.awaitingApproval },
+            updatedAt: new Date().toISOString(),
+          });
+          const snapshot = this._snapshot(run);
+          await this._saveSnapshot(snapshot);
+          return snapshot;
+        }
+
         run.stages.set(stage, {
           ...stageSnapshotForTask(stage, task, existing),
-          status: "awaiting_approval",
-          attempts: existing?.attempts ?? 0,
-          awaitingApproval: { ...task.awaitingApproval },
+          status: "running",
+          attempts: attempt,
+          startedAt: new Date().toISOString(),
+          endedAt: undefined,
+          failureReason: undefined,
           updatedAt: new Date().toISOString(),
         });
-        const snapshot = this._snapshot(run);
-        await this._saveSnapshot(snapshot);
-        return snapshot;
-      }
+        await this._saveSnapshot(this._snapshot(run));
 
-      run.stages.set(stage, {
-        ...stageSnapshotForTask(stage, task, existing),
-        status: "running",
-        attempts: attempt,
-        startedAt: new Date().toISOString(),
-        endedAt: undefined,
-        failureReason: undefined,
-        updatedAt: new Date().toISOString(),
-      });
-      await this._saveSnapshot(this._snapshot(run));
-
-      try {
-        const result = await this._llmRunner.runStage({
-          runId: run.runId,
-          title: run.title,
-          objective: run.objective,
-          stage,
-          attempt,
-          task,
-          worker,
-          previousStages: stageSnapshotsFromMap(run.stages).filter((entry) => entry.stage !== stage),
-        });
-        const completedAt = new Date().toISOString();
-        const artifacts = normalizeStageArtifacts(result.artifacts ?? []);
-        run.stages.set(stage, {
-          ...stageSnapshotForTask(stage, task, run.stages.get(stage)),
-          status: "completed",
-          attempts: attempt,
-          startedAt: run.stages.get(stage)?.startedAt ?? completedAt,
-          endedAt: completedAt,
-          summary: readStageSummary(result.summary),
-          artifacts,
-          artifactCount: artifacts.length,
-          artifactReview: summarizeStageArtifacts(artifacts),
-          totalTokens: validOptionalNumber(result.totalTokens),
-          estimatedCostUsd: validOptionalNumber(result.estimatedCostUsd),
-          failureReason: undefined,
-          updatedAt: completedAt,
-        });
-        if (task?.assignedWorkerId) {
-          this.coordinator.completeTask(task.taskId, task.assignedWorkerId, result.summary);
+        try {
+          const result = await this._llmRunner.runStage({
+            runId: run.runId,
+            title: run.title,
+            objective: run.objective,
+            stage,
+            attempt,
+            task,
+            worker,
+            previousStages: stageSnapshotsFromMap(run.stages).filter((entry) => entry.stage !== stage),
+          });
+          const completedAt = new Date().toISOString();
+          const artifacts = normalizeStageArtifacts(result.artifacts ?? []);
+          run.stages.set(stage, {
+            ...stageSnapshotForTask(stage, task, run.stages.get(stage)),
+            status: "completed",
+            attempts: attempt,
+            startedAt: run.stages.get(stage)?.startedAt ?? completedAt,
+            endedAt: completedAt,
+            summary: readStageSummary(result.summary),
+            artifacts,
+            artifactCount: artifacts.length,
+            artifactReview: summarizeStageArtifacts(artifacts),
+            totalTokens: validOptionalNumber(result.totalTokens),
+            estimatedCostUsd: validOptionalNumber(result.estimatedCostUsd),
+            failureReason: undefined,
+            updatedAt: completedAt,
+          });
+          if (task?.assignedWorkerId) {
+            this.coordinator.completeTask(task.taskId, task.assignedWorkerId, result.summary);
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          markRunStageFailure(run, stage, reason);
+          if (task?.assignedWorkerId) this.coordinator.failTask(task.taskId, task.assignedWorkerId, reason);
+          this.coordinator.collectFanIn(run.executionId);
+          const snapshot = this._snapshot(run);
+          await this._saveSnapshot(snapshot);
+          return snapshot;
         }
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        markRunStageFailure(run, stage, reason);
-        if (task?.assignedWorkerId) this.coordinator.failTask(task.taskId, task.assignedWorkerId, reason);
-        this.coordinator.collectFanIn(run.executionId);
-        const snapshot = this._snapshot(run);
-        await this._saveSnapshot(snapshot);
-        return snapshot;
       }
-    }
 
-    this.coordinator.collectFanIn(run.executionId);
-    run.updatedAt = new Date().toISOString();
-    const snapshot = this._snapshot(run);
-    await this._saveSnapshot(snapshot);
-    return snapshot;
+      this.coordinator.collectFanIn(run.executionId);
+      run.updatedAt = new Date().toISOString();
+      const snapshot = this._snapshot(run);
+      await this._saveSnapshot(snapshot);
+      return snapshot;
+    } finally {
+      this._releaseRunSlot();
+    }
   }
 
   private async _runPersistedLlmStages(
@@ -479,62 +548,67 @@ export class ColonySwarmRuntime {
       return withPersistedStageFailure(snapshot, fromStage, "LLM swarm runner is not configured");
     }
 
-    let current = normalizeSwarmRunSnapshot(snapshot);
-    for (const stage of SWARM_STAGE_ORDER.slice(SWARM_STAGE_ORDER.indexOf(fromStage))) {
-      const existing = current.stages.find((entry) => entry.stage === stage) ?? initialStageSnapshot(stage, current.updatedAt);
-      if (existing.status === "completed") continue;
-      if (existing.status === "awaiting_approval") {
-        return preservePersistedApprovalWait(current, stage);
-      }
-      const attempt = existing.attempts + 1;
-      const attemptLimit = explicitRetry ? MANUAL_RETRY_ATTEMPT_LIMIT : current.maxAttempts;
-      if (attempt > attemptLimit) {
-        return withPersistedStageFailure(current, stage, `Swarm stage ${stage} exceeded ${attemptLimit} attempts`);
-      }
-      const retryHistory = existing.status === "running"
-        ? appendInterruptedStageRetryHistory(existing)
-        : existing.retryHistory ?? [];
-      current = upsertPersistedStage(current, {
-        ...existing,
-        status: "running",
-        attempts: attempt,
-        startedAt: new Date().toISOString(),
-        endedAt: undefined,
-        failureReason: undefined,
-        retryHistory,
-        updatedAt: new Date().toISOString(),
-      });
-      try {
-        const result = await this._llmRunner.runStage({
-          runId: current.runId,
-          title: current.title,
-          objective: current.objective,
-          stage,
-          attempt,
-          previousStages: current.stages.filter((entry) => entry.stage !== stage),
-        });
-        const artifacts = normalizeStageArtifacts(result.artifacts ?? []);
+    await this._acquireRunSlot();
+    try {
+      let current = normalizeSwarmRunSnapshot(snapshot);
+      for (const stage of SWARM_STAGE_ORDER.slice(SWARM_STAGE_ORDER.indexOf(fromStage))) {
+        const existing = current.stages.find((entry) => entry.stage === stage) ?? initialStageSnapshot(stage, current.updatedAt);
+        if (existing.status === "completed") continue;
+        if (existing.status === "awaiting_approval") {
+          return preservePersistedApprovalWait(current, stage);
+        }
+        const attempt = existing.attempts + 1;
+        const attemptLimit = explicitRetry ? MANUAL_RETRY_ATTEMPT_LIMIT : current.maxAttempts;
+        if (attempt > attemptLimit) {
+          return withPersistedStageFailure(current, stage, `Swarm stage ${stage} exceeded ${attemptLimit} attempts`);
+        }
+        const retryHistory = existing.status === "running"
+          ? appendInterruptedStageRetryHistory(existing)
+          : existing.retryHistory ?? [];
         current = upsertPersistedStage(current, {
           ...existing,
-          status: "completed",
+          status: "running",
           attempts: attempt,
-          startedAt: current.stages.find((entry) => entry.stage === stage)?.startedAt ?? new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-          summary: readStageSummary(result.summary),
-          artifacts,
-          artifactCount: artifacts.length,
-          artifactReview: summarizeStageArtifacts(artifacts),
-          totalTokens: validOptionalNumber(result.totalTokens),
-          estimatedCostUsd: validOptionalNumber(result.estimatedCostUsd),
+          startedAt: new Date().toISOString(),
+          endedAt: undefined,
           failureReason: undefined,
           retryHistory,
           updatedAt: new Date().toISOString(),
         });
-      } catch (error) {
-        return withPersistedStageFailure(current, stage, error instanceof Error ? error.message : String(error));
+        try {
+          const result = await this._llmRunner.runStage({
+            runId: current.runId,
+            title: current.title,
+            objective: current.objective,
+            stage,
+            attempt,
+            previousStages: current.stages.filter((entry) => entry.stage !== stage),
+          });
+          const artifacts = normalizeStageArtifacts(result.artifacts ?? []);
+          current = upsertPersistedStage(current, {
+            ...existing,
+            status: "completed",
+            attempts: attempt,
+            startedAt: current.stages.find((entry) => entry.stage === stage)?.startedAt ?? new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            summary: readStageSummary(result.summary),
+            artifacts,
+            artifactCount: artifacts.length,
+            artifactReview: summarizeStageArtifacts(artifacts),
+            totalTokens: validOptionalNumber(result.totalTokens),
+            estimatedCostUsd: validOptionalNumber(result.estimatedCostUsd),
+            failureReason: undefined,
+            retryHistory,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          return withPersistedStageFailure(current, stage, error instanceof Error ? error.message : String(error));
+        }
       }
+      return finalizePersistedSnapshot(current);
+    } finally {
+      this._releaseRunSlot();
     }
-    return finalizePersistedSnapshot(current);
   }
 
   private _stageTask(executionId: string, stage: SwarmStage): CoordinatorTaskSnapshot | undefined {
@@ -683,19 +757,6 @@ export function createAgentLoopSwarmStageRunner(
       };
     },
   };
-}
-
-class MemoryWorkflowStore implements WorkflowStore {
-  private readonly _runs = new Map<string, WorkflowRun>();
-
-  async saveRun(run: WorkflowRun): Promise<void> {
-    this._runs.set(run.id, JSON.parse(JSON.stringify(run)) as WorkflowRun);
-  }
-
-  async loadRun(runId: string): Promise<WorkflowRun | null> {
-    const run = this._runs.get(runId);
-    return run ? JSON.parse(JSON.stringify(run)) as WorkflowRun : null;
-  }
 }
 
 function normalizeSwarmRunJournalRecord(record: SwarmRunJournalRecord): SwarmRunJournalRecord {

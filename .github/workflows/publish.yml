@@ -1,0 +1,150 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write   # for creating GitHub releases
+  id-token: write   # for npm provenance
+
+jobs:
+  test:
+    name: Pre-publish gate — tests + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Tests
+        run: bun test --reporter=verbose
+
+      - name: Type-check (main)
+        run: bun run tsc --noEmit
+
+      - name: Type-check (vscode-extension)
+        run: |
+          cd vscode-extension
+          npm install --no-audit --no-fund
+          npx tsc -p . --noEmit
+
+  publish-npm:
+    name: Publish @colony/cli to npm
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install (needed for any prepublish scripts)
+        run: bun install --frozen-lockfile
+
+      - name: Verify pack contents
+        run: npm pack --dry-run
+
+      - name: Publish
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-vscode:
+    name: Publish colony-vscode to VS Code Marketplace
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install + compile extension
+        run: |
+          cd vscode-extension
+          npm install --no-audit --no-fund
+          npm run compile
+
+      - name: Package .vsix
+        run: |
+          cd vscode-extension
+          npx vsce package
+
+      - name: Publish
+        run: |
+          cd vscode-extension
+          npx vsce publish -p "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Upload .vsix as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension-vsix
+          path: vscode-extension/*.vsix
+
+  github-release:
+    name: Create GitHub release
+    needs: [publish-npm, publish-vscode]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for auto-generated notes
+
+      - name: Download .vsix artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vscode-extension-vsix
+          path: ./release-assets
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Pull just the section for this version out of CHANGELOG.md
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if ($0 ~ "\\[" ver "\\]") { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG section found for $VERSION — using auto-generated notes"
+            echo "AUTO_NOTES=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ steps.changelog.outputs.AUTO_NOTES }}" = "true" ]; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              ./release-assets/*.vsix
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file release-notes.md \
+              ./release-assets/*.vsix
+          fi

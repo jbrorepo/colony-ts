@@ -41,6 +41,7 @@ export interface PolicyEngineConfig {
   defaultDecision: PolicyDecision;
   enableAuditLogging: boolean;
   maxRules: number;
+  maxLogEntries: number;
 }
 
 export interface PolicyEvaluationLogEntry {
@@ -68,6 +69,7 @@ export const DEFAULT_POLICY_ENGINE_CONFIG: PolicyEngineConfig = {
   defaultDecision: PolicyDecision.DENY,
   enableAuditLogging: true,
   maxRules: 1000,
+  maxLogEntries: 5000,
 };
 
 const DEFAULT_RULES: PolicyRuleInput[] = [
@@ -196,6 +198,9 @@ export class SecurityPolicyEngine {
       matchedRule: evaluation.matchedRule,
       reason: evaluation.reason,
     };
+    if (this.evaluationLog.length >= this.config.maxLogEntries) {
+      this.evaluationLog.shift();
+    }
     this.evaluationLog.push(entry);
   }
 }
@@ -250,8 +255,14 @@ function matchesRule(rule: PolicyRule, context: PolicyContext): boolean {
   return true;
 }
 
+const _globRegexCache = new Map<string, RegExp>();
+
 function globMatch(value: string, pattern: string): boolean {
-  const regex = new RegExp(`^${escapeRegex(pattern).replace(/\*/g, ".*").replace(/\\\?/g, ".")}$`);
+  let regex = _globRegexCache.get(pattern);
+  if (!regex) {
+    regex = new RegExp(`^${escapeRegex(pattern).replace(/\*/g, ".*").replace(/\\\?/g, ".")}$`);
+    _globRegexCache.set(pattern, regex);
+  }
   return regex.test(value);
 }
 

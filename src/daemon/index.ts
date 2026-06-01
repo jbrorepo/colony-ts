@@ -5,6 +5,7 @@ export {
 export {
   DaemonAuthPolicy,
   extractBearerToken,
+  generateDaemonToken,
 } from "./auth";
 export type {
   DaemonAuthDecision,

@@ -9,6 +9,8 @@ import type {
   WorkflowAutomationController,
   WorkflowAutomationResponse,
 } from "../workflow";
+import type { ColonySwarmRuntime } from "../orchestrator/swarm";
+import type { McpServerRegistry } from "../mcp/server-registry";
 import type { DaemonAuthScope } from "./auth";
 
 export type DaemonControlPlaneCommand =
@@ -88,18 +90,34 @@ export interface DaemonControlPlaneResponse {
 export interface DaemonControlPlaneHostOptions {
   sessionManager?: SessionManager;
   workflowController?: WorkflowAutomationController;
+  swarmRuntime?: ColonySwarmRuntime;
+  mcpServerRegistry?: McpServerRegistry;
   startedAt?: string;
 }
 
 export class DaemonControlPlaneHost {
   private readonly _sessionManager: SessionManager;
   private readonly _workflowController?: WorkflowAutomationController;
+  private readonly _swarmRuntime?: ColonySwarmRuntime;
+  private readonly _mcpServerRegistry?: McpServerRegistry;
   private readonly _startedAt: string;
 
   constructor(options: DaemonControlPlaneHostOptions = {}) {
     this._sessionManager = options.sessionManager ?? new SessionManager();
     this._workflowController = options.workflowController;
+    this._swarmRuntime = options.swarmRuntime;
+    this._mcpServerRegistry = options.mcpServerRegistry;
     this._startedAt = options.startedAt ?? new Date().toISOString();
+  }
+
+  /** Accessor for the REST layer — returns null if swarm runtime is unconfigured. */
+  get swarmRuntime(): ColonySwarmRuntime | null {
+    return this._swarmRuntime ?? null;
+  }
+
+  /** Accessor for the MCP server registry — returns null if unconfigured. */
+  get mcpServerRegistry(): McpServerRegistry | null {
+    return this._mcpServerRegistry ?? null;
   }
 
   async handle(command: DaemonControlPlaneCommand): Promise<DaemonControlPlaneResponse> {
@@ -220,6 +238,8 @@ export class DaemonControlPlaneHost {
       "sessions.close",
     ];
     if (this._workflowController) capabilities.push("workflow.automation");
+    if (this._swarmRuntime) capabilities.push("swarm.runs", "swarm.detached");
+    if (this._mcpServerRegistry) capabilities.push("mcp.servers");
     return capabilities;
   }
 }

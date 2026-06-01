@@ -139,6 +139,7 @@ import { buildSkillsCommandPayload } from "./gateway-skills";
 import { buildCapabilitiesCommandPayload } from "./gateway-capabilities";
 import { buildGitHubCommandPayload } from "./gateway-github";
 import { buildPluginsCommandPayload } from "./gateway-plugins";
+import { buildMcpCommandPayload } from "./gateway-mcp";
 import { buildAuditCommandPayload } from "./gateway-audit";
 import {
   buildCancelCommandPayload,
@@ -253,6 +254,7 @@ export class SlashCommandParser {
     this.register("capabilities", this.cmdCapabilities);
     this.register("github", this.cmdGitHub);
     this.register("plugins", this.cmdPlugins);
+    this.register("mcp", this.cmdMcp);
     this.register("audit", this.cmdAudit);
     this.register("cancel", this.cmdCancel);
     this.register("clear", this.cmdClear);
@@ -801,6 +803,17 @@ export class SlashCommandParser {
     const payload = buildPluginsCommandPayload(args, ctx.plugins as Parameters<typeof buildPluginsCommandPayload>[1]);
     return result({
       command: "plugins",
+      output: payload.output,
+      data: payload.data ?? {},
+      isError: payload.isError,
+      action: payload.action as CommandAction | undefined,
+    });
+  };
+
+  private cmdMcp = (args: string[], ctx: SlashCommandContext): CommandResult => {
+    const payload = buildMcpCommandPayload(args, ctx.mcp as Parameters<typeof buildMcpCommandPayload>[1]);
+    return result({
+      command: "mcp",
       output: payload.output,
       data: payload.data ?? {},
       isError: payload.isError,

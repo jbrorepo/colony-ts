@@ -1,9 +1,31 @@
+import { randomBytes } from "crypto";
+
+/**
+ * Generate a cryptographically random daemon auth token.
+ * Returns 32 bytes (256 bits) encoded as hex — suitable for bearer tokens and
+ * HMAC shared-secret keys.
+ *
+ * Usage at daemon startup:
+ * ```typescript
+ * const token = generateDaemonToken();
+ * // Write to a local .colony-daemon.token file, chmod 600
+ * // Pass to DaemonAuthPolicy as the operator token
+ * ```
+ */
+export function generateDaemonToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
 export type DaemonAuthScope =
   | "daemon.describe"
   | "sessions.read"
   | "sessions.write"
   | "workflow.read"
   | "workflow.write"
+  | "swarm.read"
+  | "swarm.write"
+  | "mcp.read"
+  | "mcp.write"
   | "web.read"
   | "web.mutate";
 

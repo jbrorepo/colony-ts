@@ -14,6 +14,8 @@
 
 import { join, basename } from "path";
 import { homedir } from "os";
+import { watch } from "fs";
+import type { FSWatcher } from "fs";
 
 import { PalaceStore } from "./store";
 import { MempalaceConfig } from "./config";
@@ -26,6 +28,7 @@ import type { SearchHit, StackStatus } from "./types";
 export class Layer0 {
   private _path: string;
   private _text: string | null = null;
+  private _watcher: FSWatcher | null = null;
 
   constructor(identityPath?: string) {
     this._path = identityPath ?? join(homedir(), ".mempalace", "identity.txt");
@@ -37,6 +40,7 @@ export class Layer0 {
     const file = Bun.file(this._path);
     if (await file.exists()) {
       this._text = (await file.text()).trim();
+      this._startWatcher();
     } else {
       this._text = "## L0 - IDENTITY\nNo identity configured. Create ~/.mempalace/identity.txt";
     }
@@ -45,6 +49,37 @@ export class Layer0 {
 
   async tokenEstimate(): Promise<number> {
     return Math.ceil((await this.render()).length / 4);
+  }
+
+  /** Force cache invalidation — next render() call will re-read from disk. */
+  invalidate(): void {
+    this._text = null;
+  }
+
+  /** Stop the file watcher and release resources. Call during session teardown. */
+  dispose(): void {
+    this._watcher?.close();
+    this._watcher = null;
+  }
+
+  /**
+   * Start watching the identity file for changes.  Invalidates the cache
+   * whenever the file is modified or renamed.  Called lazily after the file
+   * is confirmed to exist.  The watcher is unreffed so it does not prevent
+   * clean process exit.
+   */
+  private _startWatcher(): void {
+    if (this._watcher) return;
+    try {
+      this._watcher = watch(this._path, () => {
+        this._text = null; // Invalidate — next render() re-reads from disk
+      });
+      // Don't keep the process alive just for cache invalidation
+      this._watcher.unref();
+    } catch {
+      // File watching is unavailable in some environments (sandboxed, read-only
+      // filesystems, etc.) — fail silently; stale cache is better than a crash
+    }
   }
 }
 
@@ -302,6 +337,14 @@ export class MemoryStack {
   /** Deep L3 semantic search. */
   async search(query: string, opts?: { wing?: string; room?: string; hall?: string; sourceFile?: string; nResults?: number }): Promise<string> {
     return this.l3.search(query, opts);
+  }
+
+  /**
+   * Release resources held by the memory stack.
+   * Stops the L0 identity file watcher.  Call during session teardown.
+   */
+  dispose(): void {
+    this.l0.dispose();
   }
 
   /** Status of all layers. */

@@ -1,10 +1,10 @@
 import { WorkflowEngine } from "../engine";
+import { MemoryWorkflowStore } from "../memory-store";
 import type {
   WorkflowDefinition,
   WorkflowRun,
   WorkflowStepHandler,
   WorkflowStepHandlers,
-  WorkflowStore,
 } from "../types";
 import { getWorkflowRecipe, listWorkflowRecipes } from "./gstack-inspired";
 
@@ -60,7 +60,7 @@ export function createExecutableWorkflowRecipe(id: string): ExecutableWorkflowRe
 }
 
 export class WorkflowRecipeRuntime {
-  private readonly store = new InMemoryWorkflowStore();
+  private readonly store = new MemoryWorkflowStore();
   private readonly engine: WorkflowEngine;
   private readonly runRecipes = new Map<string, string>();
   private readonly snapshots = new Map<string, WorkflowRecipeRuntimeSnapshot>();
@@ -193,15 +193,3 @@ function recipeTaskHandler(recipeId: string, stepId: string, title: string): Wor
   });
 }
 
-class InMemoryWorkflowStore implements WorkflowStore {
-  private readonly runs = new Map<string, WorkflowRun>();
-
-  async saveRun(run: WorkflowRun): Promise<void> {
-    this.runs.set(run.id, JSON.parse(JSON.stringify(run)) as WorkflowRun);
-  }
-
-  async loadRun(runId: string): Promise<WorkflowRun | null> {
-    const run = this.runs.get(runId);
-    return run ? JSON.parse(JSON.stringify(run)) as WorkflowRun : null;
-  }
-}

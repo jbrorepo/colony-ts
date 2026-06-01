@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  test:
+    name: Unit tests (bun test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test --reporter=verbose
+
+      - name: Run tests with coverage
+        run: bun test --coverage > coverage.txt 2>&1 || true
+
+      - name: Upload coverage as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: coverage.txt
+          if-no-files-found: ignore
+
+  typecheck:
+    name: TypeScript type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Type-check main
+        run: bun run tsc --noEmit
+
+      - name: Type-check vscode-extension
+        run: |
+          cd vscode-extension
+          npm install --no-audit --no-fund
+          npx tsc -p . --noEmit
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Audit main package (best effort)
+        run: npm audit --omit=dev || echo "::warning::npm audit found issues — review the log"
+
+      - name: Audit vscode-extension (best effort)
+        run: |
+          cd vscode-extension
+          npm install --no-audit --no-fund
+          npm audit --omit=dev || echo "::warning::npm audit found issues — review the log"
+
+  pack-dry-run:
+    name: Package dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Dry-run pack
+        run: |
+          npm pack --dry-run 2>&1 | tee /tmp/pack.log
+          # Fail if the tarball would ship test files, verify scripts,
+          # or alpha files — those should be excluded by the `files`
+          # patterns in package.json.
+          if grep -E "src/__tests__/|src/verify-phase|src/alpha0-|src/smoke-alpha0-|src/verify-|src/web-control" /tmp/pack.log; then
+            echo "::error::Pack would ship internal/test files. Update package.json `files` exclusions."
+            exit 1
+          fi
+
+      - name: Check pack size
+        run: |
+          npm pack --dry-run --json 2>&1 \
+            | tail -n +1 \
+            | python3 -c "import sys,json; d=json.load(sys.stdin)[0]; print(f'Pack: {d[\"size\"]} bytes ({d[\"unpackedSize\"]} unpacked, {d[\"entryCount\"]} files)'); assert d['size'] < 10_000_000, f'pack too large: {d[\"size\"]}'"

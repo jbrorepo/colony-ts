@@ -1,0 +1,60 @@
+name: ✨ Feature request
+description: Suggest a new capability for Colony.
+title: "[feature] "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Before submitting, please check
+        whether your idea fits Colony's [hard rules](../CONTRIBUTING.md#hard-rules) —
+        especially "no vendor LLM SDKs" and "default-deny security."
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What's the user pain or unmet need?
+      placeholder: "When I'm doing X, I have to do Y workaround because Colony doesn't..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Concrete description of the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about and why they're worse.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      multiple: true
+      options:
+        - CLI (terminal TUI)
+        - Daemon REST API
+        - Web dashboard
+        - VS Code extension
+        - Plugin / MCP server
+        - Security model
+        - Documentation
+        - Other
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Hard rules check
+      description: Confirm your proposal respects these
+      options:
+        - label: Does not require a vendor LLM SDK (Anthropic/OpenAI SDK etc.)
+        - label: Does not weaken default-deny security
+        - label: Does not bypass approval gates
+        - label: Does not break verbatim tool truth

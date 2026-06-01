@@ -27,3 +27,5 @@ colony.exe
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+dist-artifacts/

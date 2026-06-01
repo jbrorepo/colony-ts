@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Colony Plugin Registry</title>
+  <meta name="description" content="The hosted plugin registry for The Colony — search, browse, and submit MCP-compatible plugins.">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d0f14;
+      --surface: #161a22;
+      --border: #2a2f3d;
+      --accent: #4ade80;
+      --accent-dim: #166534;
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --error: #f87171;
+      --radius: 8px;
+      --font: 'Inter', -apple-system, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    header {
+      padding: 32px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    header h1 {
+      font-size: 28px;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    header p { color: var(--text-muted); max-width: 720px; }
+    header .links {
+      margin-top: 16px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    header .links a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    header .links a:hover { text-decoration: underline; }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .toolbar input {
+      flex: 1;
+      min-width: 240px;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-family: var(--font);
+      font-size: 14px;
+    }
+    .toolbar .stat {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-family: var(--font-mono);
+    }
+    .plugin-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 12px;
+      transition: border-color 0.15s ease;
+    }
+    .plugin-card:hover { border-color: var(--accent-dim); }
+    .plugin-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .plugin-id {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .badge-verified { background: var(--accent-dim); color: var(--accent); }
+    .badge-kind { background: var(--border); color: var(--text-muted); }
+    .plugin-desc { color: var(--text); margin-bottom: 10px; }
+    .plugin-meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .plugin-tags {
+      margin-top: 10px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+    }
+    .tag:hover { color: var(--accent); border-color: var(--accent-dim); }
+    .install-hint {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: var(--bg);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .install-hint code { color: var(--accent); }
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+    footer {
+      padding: 32px 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Colony Plugin Registry</h1>
+    <p>The hosted plugin registry for <strong>The Colony</strong> — a local-first, security-first agent runtime. Plugins extend Colony with new tools and capabilities while staying within the caste-based RBAC and approval-gate security model.</p>
+    <div class="links">
+      <a href="https://github.com/jbrorepo/colony-ts">GitHub</a>
+      <a href="https://npmjs.com/package/@colony/cli">npm</a>
+      <a href="./SUBMITTING.md">Submit a plugin</a>
+      <a href="./v1/index.json">Raw JSON</a>
+      <a href="./v1/schema.json">JSON Schema</a>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <input id="search" type="text" placeholder="Search plugins by id, name, description, or tag…" autocomplete="off" />
+      <span class="stat" id="stat">Loading…</span>
+    </div>
+    <div id="plugins"></div>
+  </main>
+  <footer>
+    <p>
+      <a href="https://github.com/jbrorepo/colony-ts">The Colony</a>
+      ·
+      <a href="./README.md">Registry docs</a>
+      ·
+      <a href="./SUBMITTING.md">Submit a plugin</a>
+      ·
+      <span id="updated"></span>
+    </p>
+  </footer>
+  <script>
+    const REGISTRY_URL = "./v1/index.json";
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderPlugins(plugins, query) {
+      const container = document.getElementById("plugins");
+      const stat = document.getElementById("stat");
+
+      const filtered = query
+        ? plugins.filter((p) => {
+            const q = query.toLowerCase();
+            return (
+              p.id.toLowerCase().includes(q) ||
+              p.name.toLowerCase().includes(q) ||
+              p.description.toLowerCase().includes(q) ||
+              p.tags.some((t) => t.toLowerCase().includes(q))
+            );
+          })
+        : plugins;
+
+      stat.textContent = query
+        ? `${filtered.length} of ${plugins.length} match "${query}"`
+        : `${plugins.length} plugins`;
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty">No plugins match your search. Try a broader term.</div>';
+        return;
+      }
+
+      container.innerHTML = filtered.map((p) => `
+        <article class="plugin-card">
+          <div class="plugin-header">
+            <span class="plugin-id">${escapeHtml(p.id)}</span>
+            <span class="badge badge-kind">${escapeHtml(p.source.split(":")[0])}</span>
+            ${p.verified ? '<span class="badge badge-verified">verified</span>' : ""}
+          </div>
+          <div class="plugin-desc"><strong>${escapeHtml(p.name)}</strong> — ${escapeHtml(p.description)}</div>
+          <div class="plugin-meta">
+            <span>v${escapeHtml(p.version)}</span>
+            <span>by ${escapeHtml(p.author)}</span>
+            <span>${escapeHtml(p.source)}</span>
+            ${p.homepageUrl ? `<a href="${escapeHtml(p.homepageUrl)}" style="color:var(--accent)">Docs ↗</a>` : ""}
+          </div>
+          <div class="plugin-tags">
+            ${p.tags.map((t) => `<span class="tag" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join("")}
+          </div>
+          <div class="install-hint">
+            Install in Colony: <code>/plugins preflight ${escapeHtml(p.id)}</code> then <code>/plugins activate ${escapeHtml(p.id)} --approved</code>
+          </div>
+        </article>
+      `).join("");
+
+      // Wire tag clicks to populate the search box
+      container.querySelectorAll(".tag").forEach((el) => {
+        el.addEventListener("click", () => {
+          const input = document.getElementById("search");
+          input.value = el.dataset.tag;
+          input.dispatchEvent(new Event("input"));
+        });
+      });
+    }
+
+    async function bootstrap() {
+      try {
+        const res = await fetch(REGISTRY_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const plugins = Array.isArray(data.plugins) ? data.plugins : [];
+
+        document.getElementById("updated").textContent =
+          "Registry updated " + (data.updated || "(unknown)");
+
+        const input = document.getElementById("search");
+        renderPlugins(plugins, "");
+        input.addEventListener("input", (e) => {
+          renderPlugins(plugins, e.target.value.trim());
+        });
+      } catch (err) {
+        document.getElementById("plugins").innerHTML =
+          '<div class="empty">Failed to load registry: ' + escapeHtml(err.message) + '</div>';
+        document.getElementById("stat").textContent = "Error";
+      }
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>

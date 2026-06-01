@@ -1,0 +1,90 @@
+{
+  "name": "colony-vscode",
+  "displayName": "The Colony",
+  "description": "Drive the Colony agent runtime from VS Code — daemon health, swarm runs, MCP server registry, and diff preview wired to a local Colony daemon.",
+  "version": "0.2.0",
+  "publisher": "colony-local",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./out/extension.js",
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": ["agent", "ai", "claude", "anthropic", "colony", "mcp", "swarm"],
+  "activationEvents": [
+    "onCommand:colony.askAboutSelection",
+    "onCommand:colony.newSessionInTerminal",
+    "onCommand:colony.setToken",
+    "onCommand:colony.showHealth",
+    "onCommand:colony.listSwarmRuns",
+    "onCommand:colony.startSwarmRun",
+    "onCommand:colony.listMcpServers",
+    "onCommand:colony.previewDiff",
+    "onCommand:colony.openDashboard"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "colony.askAboutSelection", "title": "Colony: Ask About Selection" },
+      { "command": "colony.newSessionInTerminal", "title": "Colony: New Session In Terminal" },
+      { "command": "colony.setToken", "title": "Colony: Set Daemon Bearer Token" },
+      { "command": "colony.showHealth", "title": "Colony: Show Daemon Health" },
+      { "command": "colony.listSwarmRuns", "title": "Colony: List Swarm Runs" },
+      { "command": "colony.startSwarmRun", "title": "Colony: Start Swarm Run (detached)" },
+      { "command": "colony.listMcpServers", "title": "Colony: List MCP Servers" },
+      { "command": "colony.previewDiff", "title": "Colony: Preview Diff (selection ↔ clipboard)" },
+      { "command": "colony.openDashboard", "title": "Colony: Open Dashboard in Browser" }
+    ],
+    "configuration": {
+      "title": "Colony",
+      "properties": {
+        "colony.daemonUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:7878",
+          "description": "Base URL of the Colony daemon (the same port `colony daemon` listens on)."
+        },
+        "colony.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Connect to the daemon on activation and show daemon health in the status bar."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "colony.askAboutSelection",
+          "group": "navigation@99",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "colony.previewDiff",
+          "group": "navigation@99",
+          "when": "editorTextFocus && editorHasSelection"
+        }
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jbrorepo/colony-ts.git",
+    "directory": "vscode-extension"
+  },
+  "homepage": "https://github.com/jbrorepo/colony-ts/tree/main/vscode-extension",
+  "bugs": {
+    "url": "https://github.com/jbrorepo/colony-ts/issues"
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "vscode:prepublish": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

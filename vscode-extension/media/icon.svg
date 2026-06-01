@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Colony icon — stylized hexagonal "C" representing both Colony and a honeycomb cell -->
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4ade80"/>
+      <stop offset="100%" stop-color="#166534"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="22" fill="#0d0f14"/>
+  <!-- Outer hexagon -->
+  <polygon points="64,16 110,40 110,88 64,112 18,88 18,40"
+           fill="none" stroke="url(#g)" stroke-width="5" stroke-linejoin="round"/>
+  <!-- Inner C -->
+  <path d="M 86 50 a 22 22 0 1 0 0 28"
+        fill="none" stroke="url(#g)" stroke-width="9" stroke-linecap="round"/>
+  <!-- Small dot — the "ant" / actor -->
+  <circle cx="64" cy="64" r="4" fill="#4ade80"/>
+</svg>

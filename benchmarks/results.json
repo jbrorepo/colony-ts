@@ -1,0 +1,152 @@
+{
+  "startedAt": "2026-05-30T00:00:24.764Z",
+  "completedAt": "2026-05-30T00:00:24.774Z",
+  "colonyVersion": "2.0.0",
+  "provider": "stub",
+  "model": "stub",
+  "taskCount": 3,
+  "castes": [
+    "nameless_swarm",
+    "forge_carvers",
+    "eldest_architect"
+  ],
+  "results": [
+    {
+      "taskId": "smoke-001-trivial-typo",
+      "repo": "smoke/repo",
+      "castes": [
+        {
+          "caste": "nameless_swarm",
+          "status": "passed",
+          "runId": "swarm_dd9797704b0f",
+          "durationMs": 4,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        },
+        {
+          "caste": "forge_carvers",
+          "status": "passed",
+          "runId": "swarm_5c0aad719381",
+          "durationMs": 1,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        },
+        {
+          "caste": "eldest_architect",
+          "status": "passed",
+          "runId": "swarm_fb5ff89a1994",
+          "durationMs": 1,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        }
+      ]
+    },
+    {
+      "taskId": "smoke-002-missing-import",
+      "repo": "smoke/repo",
+      "castes": [
+        {
+          "caste": "nameless_swarm",
+          "status": "passed",
+          "runId": "swarm_00b55689365e",
+          "durationMs": 1,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        },
+        {
+          "caste": "forge_carvers",
+          "status": "passed",
+          "runId": "swarm_ecfffabf893f",
+          "durationMs": 0,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        },
+        {
+          "caste": "eldest_architect",
+          "status": "passed",
+          "runId": "swarm_900a242345f6",
+          "durationMs": 1,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        }
+      ]
+    },
+    {
+      "taskId": "smoke-003-off-by-one",
+      "repo": "smoke/repo",
+      "castes": [
+        {
+          "caste": "nameless_swarm",
+          "status": "passed",
+          "runId": "swarm_1fcd5eb25e4e",
+          "durationMs": 0,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        },
+        {
+          "caste": "forge_carvers",
+          "status": "passed",
+          "runId": "swarm_5da975e7e34b",
+          "durationMs": 1,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        },
+        {
+          "caste": "eldest_architect",
+          "status": "passed",
+          "runId": "swarm_b98c45d27dcd",
+          "durationMs": 0,
+          "stageStatuses": {
+            "plan": "completed",
+            "execute": "completed",
+            "review": "completed"
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "nameless_swarm": {
+      "passed": 3,
+      "failed": 0,
+      "total": 3,
+      "passRate": 1
+    },
+    "forge_carvers": {
+      "passed": 3,
+      "failed": 0,
+      "total": 3,
+      "passRate": 1
+    },
+    "eldest_architect": {
+      "passed": 3,
+      "failed": 0,
+      "total": 3,
+      "passRate": 1
+    }
+  }
+}
