@@ -35,7 +35,7 @@ jobs:
           bun test src/__tests__/mcp/plugin-registry-client.test.ts
 
       - name: Package registry as Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./registry
 
