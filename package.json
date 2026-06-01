@@ -478,7 +478,7 @@
     "github:create-pr": "bun run scripts/github-pr-execute.ts"
   },
   "dependencies": {
-    "ink": "^4.4.1",
+    "ink": "^7.0.5",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^5.0.1",
     "react": "^18.2.0",
